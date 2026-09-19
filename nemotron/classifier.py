@@ -51,7 +51,7 @@ def heuristic_classify(swing, pose=None):
     return {"shot": shot, "target_zone": zone, "confidence": .5}
 
 
-def classify_with_metadata(swing, pose=None, *, offline=False, log_dir=None, request_id=None, client=None):
+def classify_with_metadata(swing, pose=None, *, offline=False, log_dir=None, request_id=None, client=None, model="nano"):
     start = time.monotonic()
     deadline = start + CONFIG["deadline_seconds"]
     fallback = heuristic_classify(swing, pose)
@@ -67,7 +67,7 @@ def classify_with_metadata(swing, pose=None, *, offline=False, log_dir=None, req
                     response = client.complete(
                         [{"role": "system", "content": SYSTEM_PROMPT},
                          {"role": "user", "content": json.dumps({"swing": swing, "pose": pose or {}}, allow_nan=False)}],
-                        model="nano", reasoning=False, max_tokens=CONFIG["max_tokens"],
+                        model=model, reasoning=False, max_tokens=CONFIG["max_tokens"],
                         timeout=max(.001, deadline - time.monotonic()), retries=0, request_id=request_id)
                     value = validate_classification(strict_json(response["content"]))
                     if time.monotonic() > deadline or discarded.is_set():

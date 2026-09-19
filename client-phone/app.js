@@ -1,8 +1,5 @@
 import { CONFIG } from '/shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '/shared/swing-detector.js';
-import { SWING_TYPES, validTrace, prepareTrace, classifyTrace, traceTelemetry } from '/shared/dtw.js';
-import { emptyAnalysis } from '/shared/shot-telemetry.js';
-import { DIRECTIONS, DIRECTION_REPEATS, validDirectionTemplates, estimateDirection } from '/shared/direction.js';
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -26,98 +23,6 @@ let calibrationMode = false;
 let practicePeaks = [];
 let practiceIndex = 0;
 let ballPhase = null;
-const templateKey = 'pickleball-dtw-templates-v1';
-let templates = {}, recording = null, pendingMotion = null, lastSwingTimestamp = 0;
-const directionKey = 'pickleball-direction-v1';
-let directionTemplates = null, directionRecording = null;
-try {
-  const saved = JSON.parse(localStorage.getItem(directionKey) || 'null');
-  if (validDirectionTemplates(saved)) directionTemplates = saved;
-} catch {}
-function stopDirection(message) {
-  clearTimeout(directionRecording?.timer); directionRecording = null;
-  $('direction-cancel').hidden = true;
-  $('direction-start').disabled = false;
-  $('direction-status').textContent = message;
-}
-function promptDirection() {
-  const label = DIRECTIONS[directionRecording.index];
-  $('direction-status').textContent = `Swing ${label.toUpperCase()} — ${directionRecording.examples[label].length + 1} of ${DIRECTION_REPEATS}. Return to your ready grip and wait for IDLE between swings.`;
-}
-$('direction-start').addEventListener('click', () => {
-  if (!motionStarted || !detector.referenceCaptured || !detector.isStatic || detector.state !== 'IDLE') {
-    $('direction-status').textContent = 'Enable motion and hold your normal playing grip still, facing the court, until IDLE. Then start again.'; return;
-  }
-  if (recording || calibrationMode) { $('direction-status').textContent = 'Finish or cancel the other calibration first.'; return; }
-  detector.captureGravityReference();
-  directionRecording = { index: 0, examples: { left: [], center: [], right: [] },
-    timer: setTimeout(() => stopDirection('Setup timed out. Previous calibration is unchanged.'), 120000) };
-  $('direction-cancel').hidden = false; $('direction-start').disabled = true;
-  promptDirection();
-});
-$('direction-cancel').addEventListener('click', () => stopDirection('Setup cancelled. Previous calibration is unchanged.'));
-if (directionTemplates) $('direction-status').textContent = 'Saved direction calibration loaded. Use the same grip, or run setup again.';
-function recordDirection(samples) {
-  if (!prepareTrace(samples)) { $('direction-status').textContent = 'Incomplete swing. Return to your ready grip, wait for IDLE, then repeat the prompted direction.'; return; }
-  const label = DIRECTIONS[directionRecording.index];
-  const start = samples[0].t;
-  directionRecording.examples[label].push(samples.map(sample => ({ ...sample, t: sample.t - start })));
-  if (directionRecording.examples[label].length === DIRECTION_REPEATS) directionRecording.index++;
-  if (directionRecording.index < DIRECTIONS.length) { promptDirection(); return; }
-  const examples = directionRecording.examples;
-  // Refuse a setup that cannot distinguish its own examples. Keep the old
-  // calibration rather than silently installing contradictory directions.
-  if (!DIRECTIONS.every(label => examples[label].every(trace => estimateDirection(trace, examples).label === label))) {
-    stopDirection('Directions were too similar. Repeat setup with clearer left, center, and right swings. Previous calibration is unchanged.'); return;
-  }
-  directionTemplates = examples;
-  let saved = true;
-  try { localStorage.setItem(directionKey, JSON.stringify(examples)); } catch { saved = false; }
-  stopDirection(`Direction setup complete. ${saved ? 'Saved on this phone.' : 'Available for this session only.'} Spawn a ball and try left, center, and right.`);
-}
-try {
-  const saved = JSON.parse(localStorage.getItem(templateKey) || 'null');
-  if (saved?.version === CONFIG.dtw.templateVersion) {
-    for (const label of SWING_TYPES) if (prepareTrace(saved.templates?.[label])) templates[label] = saved.templates[label];
-  }
-} catch {}
-const templateButtons = [...document.querySelectorAll('[data-template]')];
-function refreshTemplates() {
-  const count = SWING_TYPES.filter(label => templates[label]).length;
-  $('template-count').textContent = `${count} / 3`;
-  templateButtons.forEach(button => {
-    const label = button.dataset.template;
-    button.textContent = `${templates[label] ? 'Re-record' : 'Record'} ${label}${templates[label] ? ' ✓' : ''}`;
-    button.disabled = Boolean(recording);
-  });
-  $('cancel-template').hidden = !recording;
-  $('clear-templates').disabled = Boolean(recording);
-  ui.calibrate.disabled = Boolean(recording);
-}
-function cancelRecording(message = 'Recording cancelled. Saved templates are unchanged.') {
-  clearTimeout(recording?.timer); recording = null;
-  if (pendingMotion?.mode === 'template') pendingMotion = null;
-  $('template-status').textContent = message; refreshTemplates();
-}
-templateButtons.forEach(button => button.addEventListener('click', () => {
-  if (directionRecording) { $('template-status').textContent = 'Finish or cancel direction setup first.'; return; }
-  if (!motionStarted) { $('template-status').textContent = 'Enable motion access first.'; return; }
-  if (!detector.referenceCaptured || detector.state !== 'IDLE') { $('template-status').textContent = 'Hold the phone still until the sensor state is IDLE, then tap Record again.'; return; }
-  calibrationMode = false;
-  const label = button.dataset.template;
-  recording = { label, timer: setTimeout(() => cancelRecording('No complete swing captured. Hold still, tap Record, and try a deliberate swing.'), CONFIG.dtw.recordingTimeoutMs) };
-  $('template-status').textContent = `Recording ${label}: perform one clean swing and finish still. No ball will launch.`;
-  refreshTemplates();
-}));
-$('cancel-template').addEventListener('click', () => cancelRecording());
-$('clear-templates').addEventListener('click', () => {
-  templates = {}; try { localStorage.removeItem(templateKey); } catch {}
-  $('template-status').textContent = 'Templates cleared. Record forehand, backhand, and smash again.'; refreshTemplates();
-});
-refreshTemplates();
-function sendAnalysis(t, analysis, connection) {
-  if (connection === socket && connection?.readyState === WebSocket.OPEN) connection.send(JSON.stringify({ t, type: 'swing_analysis', analysis }));
-}
 const spawnButton = $('spawn-button');
 function updateBallControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
@@ -248,42 +153,7 @@ function onMotion(event) {
   lastSensorAt = now;
   const swing = detector.update({ t: now, acceleration: { x: raw.x, y: raw.y, z: raw.z }, rotationRate: event.rotationRate || {} });
   updateReadings();
-  if (swing) {
-    if (directionRecording) recordDirection(detector.trace.slice());
-    else if (recording) pendingMotion = { mode: 'template', label: recording.label, contactT: swing.t };
-    else {
-      const message = sendSwing(swing, false);
-      if (message) {
-        const connection = socket;
-        const timer = setTimeout(() => {
-          sendAnalysis(message.t, emptyAnalysis('incomplete', swing.peak_g), connection);
-          if (pendingMotion?.t === message.t) pendingMotion = null;
-        }, CONFIG.dtw.analysisTimeoutMs);
-        pendingMotion = { mode: 'play', t: message.t, contactT: swing.t, connection, timer };
-      }
-    }
-  }
-  const completed = detector.takeCompletedSwing();
-  if (completed && pendingMotion?.contactT === completed.swing.t) {
-    const pending = pendingMotion; pendingMotion = null;
-    if (pending.mode === 'template') {
-      if (!recording || recording.label !== pending.label) return;
-      if (!prepareTrace(completed.samples)) { cancelRecording('Recording was too short, still, or incomplete. Try a smooth full swing.'); return; }
-      // Relative times make stored templates independent of the browser session.
-      const start = completed.samples[0].t;
-      templates[pending.label] = completed.samples.map(s => ({ ...s, t: s.t - start }));
-      let persisted = true;
-      try { localStorage.setItem(templateKey, JSON.stringify({ version: CONFIG.dtw.templateVersion, templates })); } catch { persisted = false; }
-      cancelRecording(`${pending.label} captured (${completed.samples.length} samples). ${persisted ? 'Saved on this phone.' : 'Browser storage unavailable: usable until this page closes.'}`);
-    } else {
-      clearTimeout(pending.timer);
-      const analysis = validTrace(completed.samples)
-        ? { ...classifyTrace(completed.samples, templates), ...traceTelemetry(completed.samples), raw_peak_g: completed.swing.peak_g }
-        : emptyAnalysis('incomplete', completed.swing.peak_g);
-      sendAnalysis(pending.t, analysis, pending.connection);
-      ui.sendDetail.textContent = `${analysis.method === 'untrained' ? 'Templates needed' : analysis.shot} · ${completed.swing.peak_g.toFixed(2)}g raw · ${Math.round(analysis.motion_duration_ms)}ms movement.`;
-    }
-  }
+  if (swing) sendSwing(swing, false);
 }
 
 function loadCalibration() {
@@ -296,7 +166,6 @@ function loadCalibration() {
 }
 
 function beginCalibration() {
-  if (directionRecording) { ui.calibrationDetail.textContent = 'Finish or cancel direction setup first.'; return; }
   if (!motionStarted) { setPermissionError('Enable motion first, then start the three-swing setup.'); return; }
   calibrationMode = true; practicePeaks = []; practiceIndex = 0;
   ui.calibrationBadge.textContent = 'IN PROGRESS'; ui.calibrationBadge.className = 'small-badge warn';
@@ -321,19 +190,14 @@ function recordPractice(rawPeak) {
 function sendSwing(swing, synthetic) {
   const rawPeak = Number(swing.peak_g);
   if (!synthetic && calibrationMode) { recordPractice(rawPeak); return false; }
+  if (ballPhase !== 'ready') { ui.sendDetail.textContent = 'Swing ignored: spawn a ball and wait for Ball ready.'; return false; }
   const peak = synthetic ? CONFIG.swing.synthetic.peak_g : calibratedPeakG(rawPeak, calibration, CONFIG);
-  lastSwingTimestamp = Math.max(Date.now(), lastSwingTimestamp + 1);
-  const message = { t: lastSwingTimestamp, type: 'swing', peak_g: peak, pitch: Number(swing.pitch) || 0, roll: Number(swing.roll) || 0, yaw_rate: Number(swing.yaw_rate) || 0, duration_ms: Number(swing.duration_ms) || 1 };
+  const message = { t: Date.now(), type: 'swing', peak_g: peak, pitch: Number(swing.pitch) || 0, roll: Number(swing.roll) || 0, yaw_rate: Number(swing.yaw_rate) || 0, duration_ms: Number(swing.duration_ms) || 1 };
   if (socket?.readyState !== WebSocket.OPEN) { ui.sendBadge.textContent = 'OFFLINE'; ui.sendBadge.className = 'small-badge bad'; ui.sendDetail.textContent = 'Swing detected, but the relay is not connected. Reconnect to the laptop and try again.'; return false; }
-  const direction = synthetic ? null : estimateDirection(detector.trace, directionTemplates);
-  socket.send(JSON.stringify(direction ? { type: 'directed_swing', swing: message, angle: direction.angle } : message));
-  if (direction) $('direction-status').textContent = direction.label === 'uncertain'
-    ? 'Direction uncertain or not calibrated — aiming straight ahead.'
-    : `Aim: ${direction.label}.`;
-  if (synthetic) sendAnalysis(message.t, emptyAnalysis('synthetic', peak), socket);
+  socket.send(JSON.stringify(message));
   ui.sendBadge.textContent = 'SENT'; ui.sendBadge.className = 'small-badge good';
   ui.sendDetail.textContent = `${synthetic ? 'Synthetic' : 'Motion'} swing sent · ${peak.toFixed(2)}g · pitch ${message.pitch.toFixed(1)}°. Watch the laptop court.`;
-  return message;
+  return true;
 }
 
 ui.enable.addEventListener('click', enableMotion);
@@ -345,7 +209,7 @@ ui.skip.addEventListener('click', () => {
   ui.calibrationBadge.textContent = 'DEFAULT'; ui.calibrationBadge.className = 'small-badge'; ui.calibrationDetail.textContent = 'Using the gentler default soft / medium / hard mapping.';
 });
 ui.synthetic.addEventListener('click', () => sendSwing({ ...CONFIG.swing.synthetic }, true));
-window.addEventListener('pagehide', () => { closing = true; stopDirection('Setup stopped.'); cancelRecording(); clearTimeout(pendingMotion?.timer); pendingMotion = null; clearTimeout(reconnectTimer); clearInterval(sensorTimer); socket?.close(); });
+window.addEventListener('pagehide', () => { closing = true; clearTimeout(reconnectTimer); clearInterval(sensorTimer); socket?.close(); });
 window.addEventListener('pageshow', event => { if (event.persisted) { closing = false; connect(); } });
 
 setSecureStatus(); loadCalibration(); updateReadings(); connect();

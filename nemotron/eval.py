@@ -56,9 +56,8 @@ def evaluate(args):
         metrics, failures = referee_metrics(records)
         rows[0] = ["State machine", "n/a", len(records), metrics["verdict"], metrics["citation"], metrics["score"], "0"]
         all_failures = [("State machine", *failure) for failure in failures]
-    for model in ("nano", "super"):
+    for label, model in (("Nemotron 3.5 Lightning", "lightning"),):
         for reasoning in (False, True):
-            label = f"Nemotron 3 {model.title()}"
             if args.live and referee_with_metadata:
                 model_records = [(f, referee_with_metadata(f["events"], f["game_state"], model=model,
                                  reasoning=reasoning, rules_path=args.rules, log_dir=raw_dir,
@@ -96,7 +95,7 @@ def evaluate(args):
     lines += ["", "## Classifier", "", f"Dataset: {'human-captured labels' if args.swings else 'synthetic smoke examples, NOT human captures'}; n={len(examples)}. Required 100 prompted human swings: {'provided ' + str(len(examples)) if args.swings else '0/100 supplied'}. Latencies below are measured wall time for the named path; offline latencies are not model/network latencies.", ""]
     classifier_rows, classifier_failures, matrices = [], [], []
     if heuristic_classify:
-        for method in ("Heuristic", "Nano live" if args.live else "Nano offline fallback"):
+        for method in ("Heuristic", "Lightning live" if args.live else "Nano offline fallback"):
             outcomes, latencies, fallback = [], [], 0
             for example in examples:
                 if example["expected_shot"] not in SHOTS:
@@ -106,7 +105,7 @@ def evaluate(args):
                     value = heuristic_classify(example["swing"], example.get("pose", {}))
                     path, reason = "heuristic", "threshold baseline"
                 else:
-                    result = classify_with_metadata(example["swing"], example.get("pose", {}), offline=not args.live, log_dir=raw_dir, request_id=example["id"])
+                    result = classify_with_metadata(example["swing"], example.get("pose", {}), offline=not args.live, log_dir=raw_dir, request_id=example["id"], model="lightning")
                     value, path, reason = result["classification"], result["path"], result.get("reason", "")
                     fallback += path == "fallback"
                 latencies.append((time.perf_counter() - start) * 1000)

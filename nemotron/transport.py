@@ -10,7 +10,8 @@ from urllib import error, request
 from uuid import uuid4
 
 ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODELS = {"nano": "nvidia/nemotron-3-nano-30b-a3b", "super": "nvidia/nemotron-3-super-120b-a12b"}
+MODELS = {"nano": "nvidia/nemotron-nano-3-30b-a3b", "super": "nvidia/nemotron-3-super-120b-a12b",
+          "lightning": "nvidia/nemotron-3.5-lightning-30b-a3b"}
 DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 
