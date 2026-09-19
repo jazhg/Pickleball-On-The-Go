@@ -16,6 +16,15 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   const sim = new Simulation();
   const handler = async (req, res) => {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Permissions-Policy': 'accelerometer=(self), gyroscope=(self)' };
+    // Explicit user action over HTTP; existing section-3 WebSocket schemas stay fixed.
+    if (req.method === 'POST' && req.url === '/api/spawn') {
+      let sameOrigin = false;
+      try { const origin = new URL(req.headers.origin); sameOrigin = origin.host === req.headers.host && origin.protocol === (insecure ? 'http:' : 'https:'); } catch {}
+      if (!sameOrigin) { res.writeHead(403, headers); return res.end(); }
+      const accepted = sim.spawn();
+      res.writeHead(accepted ? 200 : 409, { ...headers, 'Content-Type': MIME['.json'] });
+      return res.end(JSON.stringify({ accepted, phase: sim.phase }));
+    }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); return res.end(); }
     let pathname;
     try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
@@ -66,7 +75,8 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     ws.isAlive = true; ws.lastSwing = -Infinity;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
-    if (ws.role === 'laptop') ws.send(JSON.stringify(sim.state()));
+    ws.send(JSON.stringify(sim.state()));
+    if (sim.pose) ws.send(JSON.stringify(sim.pose));
     ws.on('message', (data, binary) => {
       if (binary) return;
       const msg = parseMessage(data);
@@ -76,8 +86,12 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs) return;
         ws.lastSwing = now;
         const accepted = sim.swing(msg);
-        console.log(`[${ws.role}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : 'outside hit window / resetting'}`);
-      } else if (msg.type === 'pose' && ws.role === 'laptop') sim.pose = msg;
+        console.log(`[${ws.role}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
+      } else if (msg.type === 'pose' && ws.role === 'laptop') {
+        sim.setPose(msg);
+        const pose = JSON.stringify(sim.pose);
+        for (const client of hub.clients) if (client.role === 'laptop' && client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(pose);
+      }
     });
   });
   let previous = performance.now(), accumulator = 0;
@@ -90,7 +104,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   }, 1000 / CONFIG.simulation.hz);
   const broadcast = setInterval(() => {
     const state = JSON.stringify(sim.state());
-    for (const client of hub.clients) if (client.role === 'laptop' && client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(state);
+    for (const client of hub.clients) if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(state);
   }, 1000 / CONFIG.simulation.broadcastHz);
   const heartbeat = setInterval(() => {
     for (const ws of hub.clients) { if (!ws.isAlive) ws.terminate(); else { ws.isAlive = false; ws.ping(); } }

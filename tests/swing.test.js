@@ -3,6 +3,19 @@ import assert from 'node:assert/strict';
 import { CONFIG } from '../shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '../shared/swing-detector.js';
 
+test('small phone movements remain idle; a swing needs quiet recovery before rearming', () => {
+  const d = new SwingDetector(); let t = 0;
+  const feed = x => d.update({ t: t += 20, acceleration: { x, y: 9.81, z: 0 }, rotationRate: {} });
+  for (let i = 0; i < 50; i++) feed(0);
+  for (let i = 0; i < 20; i++) { assert.equal(feed(i % 2 ? 15 : -15), null); assert.equal(d.state, 'IDLE'); }
+  feed(30); feed(40); feed(15); feed(-15);
+  assert.ok(feed(-20));
+  feed(0);
+  for (let i = 0; i < 40; i++) { assert.equal(feed(15), null); assert.equal(d.state, 'FOLLOW'); }
+  for (let i = 0; i < 31; i++) feed(0);
+  assert.equal(d.state, 'IDLE');
+});
+
 function motionSequence() {
   const detector = new SwingDetector(CONFIG);
   let t = 0;
@@ -27,7 +40,7 @@ test('still samples establish a flat reference, then one reversal emits one swin
 });
 
 test('calibration requires increasing soft, medium, hard peaks and maps to canonical anchors', () => {
-  const peaks = { soft: 1.8, medium: 3.2, hard: 5.9 };
+  const peaks = { soft: 2.8, medium: 4.2, hard: 8.9 };
   assert.equal(validCalibration(peaks), true);
   assert.equal(validCalibration({ soft: 3.2, medium: 3.1, hard: 5.9 }), false);
   assert.ok(Math.abs(calibratedPeakG(peaks.medium, peaks) - CONFIG.calibration.mediumG) < 0.001);

@@ -4,10 +4,11 @@ const radians = deg => deg * Math.PI / 180;
 
 export function speedFromPeak(peak, calibration = CONFIG.calibration) {
   const c = calibration;
+  if (peak <= 0) return CONFIG.physics.minSpeed;
   const low = peak <= c.mediumG;
   const g0 = low ? c.softG : c.mediumG, g1 = low ? c.mediumG : c.hardG;
   const s0 = low ? c.softSpeed : c.mediumSpeed, s1 = low ? c.mediumSpeed : c.hardSpeed;
-  return clamp(s0 + (s1 - s0) * (peak - g0) / (g1 - g0), CONFIG.physics.minSpeed, CONFIG.physics.maxSpeed);
+  return clamp(s0 + (s1 - s0) * (peak - g0) / (g1 - g0), CONFIG.physics.minSpeed, Math.min(c.powerCap, CONFIG.physics.maxSpeed));
 }
 
 export class Simulation {
@@ -15,8 +16,27 @@ export class Simulation {
   reset() {
     const p = this.config.player;
     this.ball = { x: p.x, y: p.paddleHeight, z: p.feedZ, vx: 0, vy: 0, vz: 0 };
-    this.phase = 'ready'; this.bounces = 0; this.age = 0; this.resetIn = 0;
+    this.phase = 'idle'; this.bounces = 0; this.age = 0; this.resetIn = 0;
     this.events = []; this.score = [0, 0]; this.server = 1;
+  }
+  spawn() {
+    if (this.phase !== 'idle') return false;
+    const p = this.paddle();
+    this.ball = { x: p.x, y: p.y, z: p.z - (this.config.player.z - this.config.player.feedZ), vx: 0, vy: 0, vz: 0 };
+    this.events = []; this.bounces = 0; this.age = 0; this.phase = 'ready';
+    return true;
+  }
+  setPose(pose) {
+    const c = this.config;
+    this.pose = { ...pose,
+      court_x: clamp(pose.court_x, -c.court.width / 2 + c.tracking.edgeMargin, c.court.width / 2 - c.tracking.edgeMargin),
+      court_y: clamp(pose.court_y, c.tracking.minZ, c.tracking.maxZ),
+      wrist_h: c.player.paddleHeight,
+    };
+    if (this.phase === 'ready') {
+      this.ball.x = this.pose.court_x;
+      this.ball.z = this.pose.court_y - (c.player.z - c.player.feedZ);
+    }
   }
   paddle() {
     const p = this.config.player;
@@ -24,11 +44,14 @@ export class Simulation {
       : { x: p.x, y: p.paddleHeight, z: p.z };
   }
   swing(swing) {
-    if (this.phase === 'reset') return false;
+    if (this.phase !== 'ready') return false;
     const ball = this.ball, paddle = this.paddle(), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
     const speed = speedFromPeak(swing.peak_g, this.config.calibration);
-    const elevation = radians(clamp(c.elevationBaseDeg + swing.pitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
+    // Equivalent paddle-face tilts should behave the same after a ±180° wrap.
+    const facePitch = Math.asin(Math.sin(radians(swing.pitch))) * 180 / Math.PI;
+    const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
+    const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
     const azimuth = radians(clamp((this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
     const raw = { vx: Math.sin(azimuth) * horizontal, vy: Math.sin(elevation) * speed, vz: -Math.cos(azimuth) * horizontal };
@@ -37,8 +60,9 @@ export class Simulation {
     const aimed = { vx: (targetX - ball.x) / flight, vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2, vz: (c.targetZ - ball.z) / flight };
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] = raw[axis] * (1 - c.aimAssist) + aimed[axis] * c.aimAssist;
     const magnitude = Math.hypot(ball.vx, ball.vy, ball.vz);
-    const adjusted = clamp(magnitude, c.minSpeed, c.maxSpeed);
+    const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;
+    ball.vy = Math.min(ball.vy, c.maxUpwardSpeed);
     this.phase = 'rally'; this.bounces = 0; this.age = 0;
     this.events.push({ type: 'contact', player: 'A', time: this.age, ball: { ...ball }, swing: { ...swing } });
     return true;
@@ -48,8 +72,8 @@ export class Simulation {
     this.events.push({ type: 'rally_end', reason, time: this.age });
   }
   step(dt = 1 / this.config.simulation.hz) {
-    if (this.phase === 'ready') return;
-    if (this.phase === 'reset') { this.resetIn -= dt; if (this.resetIn <= 0) this.reset(); return; }
+    if (this.phase === 'ready' || this.phase === 'idle') return;
+    if (this.phase === 'reset') { this.resetIn -= dt; if (this.resetIn <= 0) this.phase = 'idle'; return; }
     const b = this.ball, c = this.config.physics, court = this.config.court;
     const oldZ = b.z, oldY = b.y;
     this.age += dt;

@@ -29,8 +29,15 @@
             <div id="court-canvas" class="court-canvas"></div>
             <div id="render-status" class="render-status" role="status"><span class="loading-ring" aria-hidden="true"></span><strong>Getting your court ready</strong><span>Loading the 3D renderer…</span></div>
             <div class="court-side-label" aria-hidden="true">20 FT × 44 FT · REGULATION DIMENSIONS</div>
-            <div class="court-bottomline"><div><span class="court-caption">YOUR SIDE</span><span class="court-subcaption">First-person · fixed position</span></div><div class="court-key"><kbd>SPACE</kbd><span>to swing</span></div></div>
+            <div class="court-bottomline"><div><span class="court-caption">YOUR SIDE</span><span class="court-subcaption">First-person · camera tracking optional</span></div><div class="court-key"><kbd>SPACE</kbd><span>to swing</span></div></div>
             <div id="shot-flash" class="shot-flash" aria-hidden="true">NICE. LET IT FLY.</div>
+            <div class="position-map" aria-label="Player position on court">
+              <svg viewBox="0 0 100 220" role="img" aria-label="Court map with your position marked by a circle">
+                <rect x="3" y="3" width="94" height="214" fill="#397d76" stroke="#fff"/>
+                <path d="M3 76H97 M3 110H97 M3 144H97 M50 3V76 M50 144V217" stroke="#fff" fill="none"/>
+                <circle id="player-dot" cx="50" cy="194" r="7" fill="#e7f59a" stroke="#19302d" stroke-width="2"/>
+              </svg><span id="position-label">You · camera off</span>
+            </div>
           </section>
 
           <aside class="session-panel" aria-label="Session controls and score">
@@ -41,7 +48,14 @@
             <div class="phase-card"><div class="phase-indicator"><span id="phase-dot" class="phase-dot"></span><strong id="phase-title">Connecting to court</strong></div><p id="phase-description">The relay server will place a ball at your paddle.</p></div>
 
             <button id="swing-button" class="swing-button" type="button" disabled><span>Swing the paddle</span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-            <p id="swing-hint" class="swing-hint">Connect to start playing.</p>
+            <button id="spawn-button" class="swing-button spawn-button" type="button" disabled>Spawn ball</button>
+            <p id="swing-hint" class="swing-hint">Spawn a ball, then swing.</p>
+            <section class="tracking-controls" aria-label="Camera position tracking">
+              <button id="camera-button" type="button" class="swing-button">Enable camera</button>
+              <button id="recenter-button" type="button" class="swing-button" disabled>Recenter position</button>
+              <p id="tracking-status" role="status">Camera off. Enable it to track where you stand. Video stays on this laptop.</p>
+              <video id="tracking-video" muted playsinline hidden></video>
+            </section>
 
             <div class="shot-details"><div class="detail-heading"><span>LAST SHOT</span><span id="shot-count">—</span></div><strong id="last-shot">Waiting for your first swing</strong><p id="last-shot-detail">Press space or use the swing button.</p></div>
             <div class="ruling-details"><div class="detail-heading"><span>LAST RULING</span></div><p id="last-ruling">No ruling yet.</p></div>
@@ -51,7 +65,7 @@
 
         <section class="getting-started" aria-label="Ways to play">
           <div class="start-title"><span class="eyebrow">PICK YOUR PADDLE</span><h2>You’re one swing away.</h2></div>
-          <div class="input-option"><span class="step-number">01</span><div><h3>Try it with your keyboard</h3><p>Press <kbd>space</kbd> to launch. Watch the bounce.<br />A fresh ball appears after each shot.</p></div></div>
+          <div class="input-option"><span class="step-number">01</span><div><h3>Try it with your keyboard</h3><p>Click Spawn ball, then press <kbd>space</kbd> to launch.<br />Request each new ball when you’re ready.</p></div></div>
           <div class="input-option"><span class="step-number">02</span><div><h3>Bring your phone into play <a class="phone-link" href="/client-phone/" target="_blank" rel="noopener" aria-label="Open phone setup">↗</a></h3><p id="phone-help">Open the phone page on the same Wi-Fi.<br />Trust your local certificate, then enable motion.</p></div></div>
         </section>
         <p id="transport-note" class="transport-note"></p>

@@ -1,4 +1,5 @@
 import { CONFIG } from '/shared/config.js';
+import { setupTracking } from './tracking.js';
 
 // The laptop renders server snapshots. There is deliberately no ball simulation here.
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
@@ -20,6 +21,25 @@ let launches = 0;
 let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
+let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.z };
+const spawnButton = document.getElementById('spawn-button');
+spawnButton.addEventListener('click', async () => {
+  spawnButton.disabled = true;
+  try {
+    const response = await fetch('/api/spawn', { method: 'POST' });
+    if (!response.ok) throw new Error('Wait until this shot finishes before spawning the next ball.');
+  } catch (error) { ui['swing-hint'].textContent = error.message; }
+  finally { updateControls(); }
+});
+
+function receivePose(pose) {
+  playerPosition = { x: pose.court_x, z: pose.court_y };
+  document.getElementById('player-dot').setAttribute('cx', 50 + pose.court_x / CONFIG.court.width * 94);
+  document.getElementById('player-dot').setAttribute('cy', 110 + pose.court_y / CONFIG.court.length * 214);
+}
+setupTracking({ onPose(pose) {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(pose));
+} });
 
 function setConnection(text, kind = '') {
   ui['connection-status'].className = `connection-status ${kind}`;
@@ -31,6 +51,7 @@ function updateControls() {
   const phase = latestState?.phase;
   const canSwing = connected && rendererReady && phase === 'ready';
   ui['swing-button'].disabled = !canSwing;
+  spawnButton.disabled = !(connected && rendererReady && phase === 'idle');
   ui['phase-dot'].className = `phase-dot ${connected ? phase || '' : ''}`;
   if (!connected) {
     ui['phase-title'].textContent = 'Connecting to court';
@@ -44,6 +65,10 @@ function updateControls() {
     ui['phase-title'].textContent = 'Preparing your view';
     ui['phase-description'].textContent = 'The server is connected. Waiting for the court renderer.';
     ui['swing-hint'].textContent = 'Your court will be ready shortly.';
+  } else if (phase === 'idle') {
+    ui['phase-title'].textContent = 'Spawn a ball to start';
+    ui['phase-description'].textContent = 'No ball is in play. Request one when you’re ready.';
+    ui['swing-hint'].textContent = 'Click Spawn ball here or on your phone.';
   } else if (phase === 'ready') {
     ui['phase-title'].textContent = 'Ready when you are';
     ui['phase-description'].textContent = 'The ball is at your paddle. Send it over the net.';
@@ -51,11 +76,11 @@ function updateControls() {
   } else if (phase === 'rally') {
     ui['phase-title'].textContent = 'Ball in play';
     ui['phase-description'].textContent = 'Follow the flight and watch the far-side bounce.';
-    ui['swing-hint'].textContent = 'A fresh ball follows this shot.';
+    ui['swing-hint'].textContent = 'After this shot, click Spawn ball to play again.';
   } else if (phase === 'reset') {
-    ui['phase-title'].textContent = 'Next ball coming up';
-    ui['phase-description'].textContent = 'Take a breath. The court is resetting for your next swing.';
-    ui['swing-hint'].textContent = 'You’ll be ready again in a moment.';
+    ui['phase-title'].textContent = 'Shot finished';
+    ui['phase-description'].textContent = 'The ball will clear, then you can request another.';
+    ui['swing-hint'].textContent = 'The next ball waits for your button press.';
   } else {
     ui['phase-title'].textContent = 'Waiting for the ball';
     ui['phase-description'].textContent = 'Connected to the relay. Waiting for its first snapshot.';
@@ -65,7 +90,7 @@ function updateControls() {
 
 function isState(message) {
   return message.type === 'state' && Number.isFinite(message.t)
-    && ['ready', 'rally', 'reset'].includes(message.phase)
+    && ['idle', 'ready', 'rally', 'reset'].includes(message.phase)
     && [1, 2].includes(message.server)
     && Array.isArray(message.score) && message.score.length === 2
     && message.score.every((n) => Number.isInteger(n) && n >= 0)
@@ -126,6 +151,7 @@ function connect() {
     try { message = JSON.parse(event.data); } catch { return; }
     if (!message || typeof message !== 'object') return;
     if (isState(message)) receiveState(message);
+    else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
   });
   socket.addEventListener('close', () => {
@@ -293,6 +319,9 @@ function createCourt(THREE) {
   readyRing.rotation.x = -Math.PI / 2;
   readyRing.visible = false;
   scene.add(readyRing);
+  const playerRing = new THREE.Mesh(new THREE.RingGeometry(CONFIG.tracking.markerRadius * 0.85, CONFIG.tracking.markerRadius, 48), new THREE.MeshBasicMaterial({ color: '#e7f59a', side: THREE.DoubleSide }));
+  playerRing.rotation.x = -Math.PI / 2;
+  scene.add(playerRing);
 
   const trailLength = Math.max(2, Math.floor(CONFIG.render.trailLength));
   const trailPositions = new Float32Array(trailLength * 3);
@@ -311,7 +340,7 @@ function createCourt(THREE) {
   }
   function applyState(state, previousPhase) {
     if (state.phase !== 'rally' || previousPhase !== 'rally') clearTrail();
-    ball.visible = ballShadow.visible = true;
+    ball.visible = ballShadow.visible = state.phase !== 'idle';
     ball.position.set(state.ball.x, state.ball.y, state.ball.z);
     ballShadow.position.set(state.ball.x, 0.006, state.ball.z);
     ballShadow.scale.setScalar(1 + Math.max(0, state.ball.y) * 0.25);
@@ -341,7 +370,8 @@ function createCourt(THREE) {
   });
   resizeObserver.observe(container);
   renderer.setAnimationLoop(() => {
-    // Milestone 1 uses a fixed player estimate; pose tracking belongs to milestone 2.
+    cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
+    playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     camera.lookAt(camera.position.x * 0.3, 0.2, 0.3);
     renderer.render(scene, camera);

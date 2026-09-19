@@ -107,7 +107,7 @@ export class SwingDetector {
       this.pitch = wrapDegrees(this.pitch + gyro.beta * dt);
       this.roll = wrapDegrees(this.roll + gyro.gamma * dt);
     }
-    if (!this.gravity) return null;
+    if (!this.gravity || !this.referenceCaptured) return null;
     const linear = Object.fromEntries(axes.map(axis => [axis, (acceleration[axis] - this.gravity[axis]) / physics.gravity]));
 
     if (this.state === 'IDLE') {
@@ -135,14 +135,15 @@ export class SwingDetector {
       return null;
     }
     if (this.state === 'CONTACT') {
-      if (this.magnitudeG < swing.endG) {
+      if (this.magnitudeG < swing.endG || t - this.startT > swing.maxWindowMs) {
         this.state = 'FOLLOW';
         this.followT = t;
       }
       return null;
     }
-    if (this.state === 'FOLLOW' && t - this.followT >= swing.refractoryMs) {
-      this.state = 'IDLE';
+    if (this.state === 'FOLLOW') {
+      if (this.magnitudeG >= swing.endG) this.followT = t;
+      else if (t - this.followT >= swing.refractoryMs) this.state = 'IDLE';
     }
     return null;
   }

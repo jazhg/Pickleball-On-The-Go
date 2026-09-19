@@ -54,4 +54,14 @@ The phone page should show **Connected to the laptop**. Tap **Send test swing** 
 | Connected, but motion stays “NO DATA” | Tap **Enable motion access** in Safari, keep the page foregrounded, check iOS Settings → Safari → Motion & Orientation Access, and hold the phone still briefly. |
 | Test swing connects but ball does not launch | Wait for the laptop ball to be ready, then press the phone test button once. The hit window is intentionally generous; repeated clicks are rate-limited. |
 
-The server is authoritative at 120 Hz and broadcasts state at 60 Hz. No webcam or pose input is part of this milestone.
+The server is authoritative at 120 Hz and broadcasts state at 60 Hz.
+
+## Manual balls, gentler swings, and camera position
+
+Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing or press Space. After each shot, the ball clears and waits for another button press. The spawn request is a same-origin POST to `/api/spawn`; the existing WebSocket message fields remain unchanged. Phones now receive the state message too, and laptops receive the existing pose message echoed by the server.
+
+Phone motion needs a 2.5g start and a 600ms quiet recovery. Pitch has less influence, upward launch speed is capped at 3.8m/s, and power saturates at 11m/s. These values live in `shared/config.js`. Tap **Use defaults** on the phone to clear an old personal calibration.
+
+On the laptop, click **Enable camera**, allow access, and stand still with shoulders and hips visible for calibration. A circle in the court map shows your estimated location, a ground ring marks your feet, and the view follows the server's position estimate. **Recenter position** resets the calibration. If tracking is lost or disabled, the last position is held. Video is processed locally; only pose coordinates go to the relay. The phone still measures swings.
+
+Position uses hip midpoint and shoulder size; depth is approximate and turning your body can affect it. This is not room-scale position measurement. The tracker uses the MediaPipe library already named in the design and its lite pose model, following the [official Web guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js). The first camera start needs internet to load the CDN library/model.

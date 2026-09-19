@@ -22,12 +22,28 @@ let calibration = null;
 let calibrationMode = false;
 let practicePeaks = [];
 let practiceIndex = 0;
+let ballPhase = null;
+const spawnButton = $('spawn-button');
+function updateBallControls() {
+  const connected = socket?.readyState === WebSocket.OPEN;
+  ui.synthetic.disabled = !connected || ballPhase !== 'ready';
+  spawnButton.disabled = !connected || ballPhase !== 'idle';
+  $('ball-status').textContent = !connected ? 'Connect to the court first.' : ({ idle: 'No ball yet. Tap Spawn ball.', ready: 'Ball ready. Make a deliberate swing.', rally: 'Ball in flight. Wait until the shot finishes.', reset: 'Shot finished. Wait for Spawn ball to become available.' }[ballPhase] || 'Waiting for court state…');
+}
+spawnButton.addEventListener('click', async () => {
+  spawnButton.disabled = true;
+  try {
+    const response = await fetch('/api/spawn', { method: 'POST' });
+    if (!response.ok) throw new Error('The court is busy. Wait for the shot to finish.');
+  } catch (error) { ui.sendDetail.textContent = error.message; }
+  finally { updateBallControls(); }
+});
 
 function setConnection(title, detail, kind = '') {
   ui.connectionTitle.textContent = title;
   ui.connectionDetail.textContent = detail;
   ui.connectionDot.className = `status-dot ${kind}`;
-  ui.synthetic.disabled = socket?.readyState !== WebSocket.OPEN;
+  updateBallControls();
 }
 
 function wireURL() {
@@ -43,10 +59,14 @@ function connect() {
   setConnection(reconnectAttempt ? 'Reconnecting to the laptop' : 'Connecting to the laptop', `Opening ${url.origin.replace(/^ws/, 'http')} …`);
   try { socket = new WebSocket(url); } catch (error) { scheduleReconnect(error.message); return; }
   socket.addEventListener('open', () => {
+    ballPhase = null;
     reconnectAttempt = 0;
     setConnection('Connected to the laptop', 'The phone paddle is on the same relay as the court.', 'connected');
     ui.sendBadge.textContent = 'READY'; ui.sendBadge.className = 'small-badge good';
-    ui.sendDetail.textContent = 'Send a test swing now, or enable motion and swing naturally.';
+    ui.sendDetail.textContent = 'Spawn a ball first, then send a test swing or use motion.';
+  });
+  socket.addEventListener('message', event => {
+    try { const state = JSON.parse(event.data); if (state.type === 'state') { ballPhase = state.phase; updateBallControls(); } } catch {}
   });
   socket.addEventListener('close', () => scheduleReconnect('The relay closed the connection.'));
   socket.addEventListener('error', () => setConnection('Cannot reach the laptop', `Check Wi-Fi and use ${window.location.protocol === 'https:' ? 'the printed HTTPS LAN URL' : 'HTTPS, not HTTP, on your phone.'}.`, 'error'));
@@ -160,7 +180,8 @@ function recordPractice(rawPeak) {
   if (practiceIndex < 3) ui.calibrationDetail.textContent = `Good. Make a ${['medium', 'hard'][practiceIndex - 1]} swing now.`;
   else if (validCalibration({ soft: practicePeaks[0], medium: practicePeaks[1], hard: practicePeaks[2] }, CONFIG)) {
     calibration = { soft: practicePeaks[0], medium: practicePeaks[1], hard: practicePeaks[2] };
-    localStorage.setItem('pickleball-calibration', JSON.stringify(calibration)); calibrationMode = false;
+    try { localStorage.setItem('pickleball-calibration', JSON.stringify(calibration)); } catch {}
+    calibrationMode = false;
     ui.calibrationBadge.textContent = 'SAVED'; ui.calibrationBadge.className = 'small-badge good'; ui.calibrationDetail.textContent = 'Calibration saved on this phone.';
   } else { calibrationMode = false; ui.calibrationBadge.textContent = 'RETRY'; ui.calibrationBadge.className = 'small-badge warn'; ui.calibrationDetail.textContent = 'The peaks must rise soft < medium < hard. Use defaults or try again with clearer swing strengths.'; }
   return rawPeak;
@@ -168,7 +189,8 @@ function recordPractice(rawPeak) {
 
 function sendSwing(swing, synthetic) {
   const rawPeak = Number(swing.peak_g);
-  if (!synthetic) recordPractice(rawPeak);
+  if (!synthetic && calibrationMode) { recordPractice(rawPeak); return false; }
+  if (ballPhase !== 'ready') { ui.sendDetail.textContent = 'Swing ignored: spawn a ball and wait for Ball ready.'; return false; }
   const peak = synthetic ? CONFIG.swing.synthetic.peak_g : calibratedPeakG(rawPeak, calibration, CONFIG);
   const message = { t: Date.now(), type: 'swing', peak_g: peak, pitch: Number(swing.pitch) || 0, roll: Number(swing.roll) || 0, yaw_rate: Number(swing.yaw_rate) || 0, duration_ms: Number(swing.duration_ms) || 1 };
   if (socket?.readyState !== WebSocket.OPEN) { ui.sendBadge.textContent = 'OFFLINE'; ui.sendBadge.className = 'small-badge bad'; ui.sendDetail.textContent = 'Swing detected, but the relay is not connected. Reconnect to the laptop and try again.'; return false; }
@@ -180,7 +202,12 @@ function sendSwing(swing, synthetic) {
 
 ui.enable.addEventListener('click', enableMotion);
 ui.calibrate.addEventListener('click', beginCalibration);
-ui.skip.addEventListener('click', () => { calibrationMode = false; ui.calibrationBadge.textContent = 'DEFAULT'; ui.calibrationBadge.className = 'small-badge'; ui.calibrationDetail.textContent = 'Using the shared default soft / medium / hard mapping.'; });
+ui.skip.addEventListener('click', () => {
+  calibrationMode = false; calibration = null;
+  try { localStorage.removeItem('pickleball-calibration'); } catch {}
+  [ui.soft, ui.medium, ui.hard].forEach(node => { node.classList.remove('done'); node.querySelector('b').textContent = '—'; });
+  ui.calibrationBadge.textContent = 'DEFAULT'; ui.calibrationBadge.className = 'small-badge'; ui.calibrationDetail.textContent = 'Using the gentler default soft / medium / hard mapping.';
+});
 ui.synthetic.addEventListener('click', () => sendSwing({ ...CONFIG.swing.synthetic }, true));
 window.addEventListener('pagehide', () => { closing = true; clearTimeout(reconnectTimer); clearInterval(sensorTimer); socket?.close(); });
 window.addEventListener('pageshow', event => { if (event.persisted) { closing = false; connect(); } });
