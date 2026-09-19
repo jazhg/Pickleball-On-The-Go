@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+logs/
+captured-swings.json
+results-live*.md

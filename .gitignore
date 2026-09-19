@@ -1,0 +1,10 @@
+node_modules/
+.certs/
+.tools/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+nemotron/logs/
+.DS_Store

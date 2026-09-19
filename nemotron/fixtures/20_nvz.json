@@ -1,0 +1,99 @@
+{
+  "id": "20_nvz",
+  "category": "nvz",
+  "name": "Unlinked momentum requires no automatic penalty",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": true,
+  "game_state": {
+    "score": [
+      6,
+      4
+    ],
+    "serving_team": "A",
+    "server_number": 1,
+    "scoring_mode": "singles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "volley",
+      "foot_legal": true,
+      "contact_above_waist": false,
+      "upward_motion": true,
+      "paddle_below_wrist": true,
+      "t": 1000
+    },
+    {
+      "event": "serve_landing",
+      "player": "B",
+      "correct_service_court": true,
+      "t": 1300
+    },
+    {
+      "event": "hit",
+      "player": "B",
+      "id": "return",
+      "volley": false,
+      "t": 1600
+    },
+    {
+      "event": "bounce",
+      "player": "A",
+      "t": 1900
+    },
+    {
+      "event": "hit",
+      "player": "A",
+      "id": "v1",
+      "volley": true,
+      "t": 2200
+    },
+    {
+      "event": "momentum",
+      "player": "A",
+      "volley_id": "unknown",
+      "touches_kitchen": true,
+      "t": 2500
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": false,
+    "player": null,
+    "rule": "none",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      6,
+      4
+    ],
+    "side_out": false
+  },
+  "expected_rule_key": "none",
+  "expected_next_server": null,
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Insufficient causal linkage: provisional no-fault. Human review may prefer an explicit replay state."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "serve",
+    "swing": {
+      "t": 1234587,
+      "type": "swing",
+      "peak_g": 3.1,
+      "pitch": 15,
+      "roll": 6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 0.8,
+      "phase": "serve",
+      "court_y": 2.9
+    }
+  }
+}
