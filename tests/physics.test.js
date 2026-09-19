@@ -44,8 +44,35 @@ test('ready ball follows the tracked player; airborne ball does not', () => {
   assert.equal(sim.ball.x, 1); assert.equal(sim.ball.z, 4.35);
   assert.equal(sim.swing(swing), true);
   const x = sim.ball.x;
-  sim.setPose({ ...sim.pose, court_x: -1 });
+  sim.setPose({ ...sim.players.A, court_x: -1 }, 'A');
   assert.equal(sim.ball.x, x);
+});
+test('player B serves toward positive z and can return player A shots', () => {
+  const sim = new Simulation();
+  sim.setPose({ t: 1, type: 'pose', court_x: 0, court_y: 5.25, torso_deg: 0, wrist_h: 0.95 }, 'B');
+  assert.equal(sim.players.B.court_y, -5.25, 'server signs B depth authoritatively');
+  assert.equal(sim.spawn('B'), true);
+  assert.equal(sim.readyFor, 'B');
+  assert.equal(sim.swing(swing, 'A'), false, 'the wrong player cannot serve');
+  assert.equal(sim.swing(swing, 'B'), true);
+  assert.ok(sim.ball.vz > 0, 'B attacks toward positive z');
+
+  Object.assign(sim.ball, sim.paddle('A'));
+  assert.equal(sim.swing(swing, 'B'), false, 'one player cannot hit twice in a row');
+  assert.equal(sim.swing(swing, 'A'), true);
+  assert.ok(sim.ball.vz < 0, 'A returns toward negative z');
+  assert.equal(sim.lastHitter, 'A');
+});
+test('rally reset preserves both tracked player poses', () => {
+  const sim = new Simulation();
+  const poseA = { t: 1, type: 'pose', court_x: 0.3, court_y: 5, torso_deg: 0, wrist_h: 0.95 };
+  const poseB = { ...poseA, court_x: -0.4 };
+  sim.setPose(poseA, 'A');
+  sim.setPose(poseB, 'B');
+  sim.reset();
+  assert.equal(sim.players.A.court_x, 0.3);
+  assert.equal(sim.players.B.court_x, -0.4);
+  assert.equal(sim.players.B.court_y, -5);
 });
 test('net catches low flight; floor bounces use restitution', () => {
   const sim = new Simulation(); sim.phase = 'rally';
@@ -56,10 +83,13 @@ test('net catches low flight; floor bounces use restitution', () => {
 });
 test('wire contract accepts design messages and rejects mutations/non-finite values', () => {
   assert.ok(validMessage(swing)); assert.ok(validMessage(new Simulation().state()));
+  assert.ok(validMessage({ t: 1, type: 'spawn' }));
+  assert.ok(validMessage({ type: 'hello', player: 'B', role: 'phone' }));
   assert.ok(validMessage({ t: 1, type: 'pose', court_x: -1.2, court_y: 2.9, torso_deg: 18, wrist_h: 0.94 }));
   assert.ok(validMessage({ type: 'ruling', fault: true, player: 'A', rule: '9.B', explanation: 'Design schema example only.', score: [6, 5], side_out: true }));
   assert.equal(validMessage({ ...swing, player: 'A' }), false);
   assert.equal(validMessage({ ...swing, peak_g: Infinity }), false);
   assert.equal(validMessage({ ...swing, duration_ms: -1 }), false);
+  assert.equal(validMessage({ t: 1, type: 'pose', player: '', court_x: 0, court_y: 5, torso_deg: 0, wrist_h: 1 }), false);
   assert.equal(parseMessage('{bad json'), null);
 });
