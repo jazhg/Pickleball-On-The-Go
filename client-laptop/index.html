@@ -57,8 +57,15 @@
               <video id="tracking-video" muted playsinline hidden></video>
             </section>
 
-            <div class="shot-details"><div class="detail-heading"><span>LAST SHOT</span><span id="shot-count">—</span></div><strong id="last-shot">Waiting for your first swing</strong><p id="last-shot-detail">Speed: —</p></div>
-            <div class="ruling-details"><div class="detail-heading"><span>LAST RULING</span></div><p id="last-ruling">No ruling yet.</p></div>
+            <div class="shot-details"><div class="detail-heading"><span>LAST SHOT</span><span id="shot-count">—</span></div><strong id="last-shot">Waiting for your first swing</strong><p id="last-shot-detail">Press space or use the swing button.</p></div>
+            <div class="ruling-details"><div class="detail-heading"><span>LAST RULING</span><button id="voice-toggle" type="button" class="voice-toggle">🔊 Voice on</button></div><p id="last-ruling">No ruling yet.</p>
+              <details id="evidence-panel" class="evidence-panel" hidden><summary>Referee evidence — explain this call</summary>
+                <p id="evidence-rule" class="evidence-rule"></p>
+                <p id="evidence-shot" class="evidence-shot"></p>
+                <ol id="evidence-events" class="evidence-events"></ol>
+              </details>
+            </div>
+            <div class="analytics-details"><div class="detail-heading"><span>SHOT ANALYTICS</span></div><p id="analytics-strip" class="analytics-strip">No shots classified yet.</p></div>
             <div class="session-footer"><span class="small-ball" aria-hidden="true">●</span> One room. One shared ball.</div>
           </aside>
         </div>

@@ -56,19 +56,6 @@ export const CONFIG = Object.freeze({
   render: {
     eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
   },
-  dtw: {
-    preRollMs: 100, // 50–150: retain the lead-in before the swing threshold.
-    points: 48, // 32–64: uniform time samples before DTW alignment.
-    bandRatio: 0.25, // 0.15–0.4: limit local timeline stretching.
-    minSamples: 8, maxSamples: 256, // Bound recording quality and CPU/memory use.
-    minDurationMs: 120, maxDurationMs: 1600, // Reject incomplete or stale recordings.
-    minAccelerationRms: 0.15, // 0.1–0.4 g: refuse still-phone templates.
-    maxDistance: 0.7, // 0.4–1.0: lower values demand closer shape matches.
-    minMargin: 0.12, // 0.05–0.25: require a clear winner over the next template.
-    recordingTimeoutMs: 10000, // 5000–15000: time to perform a prompted template.
-    analysisTimeoutMs: 2000, // 1500–4000: show incomplete analysis after missing samples.
-    templateVersion: 1,
-  },
   tracking: {
     version: '0.10.21',
     visibility: 0.65, // 0.5–0.8: reject uncertain shoulders/hips.
@@ -86,5 +73,11 @@ export const CONFIG = Object.freeze({
     port: 8443, reconnectMs: 1500, // 500–5000: browser reconnect delay.
     maxPayloadBytes: 2048, minSwingIntervalMs: 180, // 100–250: relay flood protection.
     heartbeatMs: 15000, // 10000–30000: close abandoned sockets.
+  },
+  nemotron: {
+    bridgeScript: 'nemotron/bridge.py', // spawned as: python3 <bridgeScript>
+    classifierTimeoutMs: 300, // 200–500: model/heuristic deadline; late results fall back.
+    refereeTimeoutMs: 25000, // 15000–30000: referee may reason; rally adjudication is async.
+    liveEnv: 'NEMOTRON_LIVE', // live model calls only when '1' AND NVIDIA_API_KEY is set.
   },
 });

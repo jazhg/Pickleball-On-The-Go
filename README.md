@@ -1,3 +1,40 @@
+# Pickleball On The Go — Milestone 1 + Nemotron
+
+**Nemotron does real work here — not chatbot work.** Two NVIDIA Nemotron models are wired
+into the live game loop: Nemotron 3 Nano classifies every swing (shot, target zone,
+confidence) from phone IMU data, and a Nemotron referee adjudicates every rally from the
+authoritative rally log, citing rulebook rules. Both run async and can never block or
+corrupt the 120 Hz simulation; when the model is unavailable the game degrades to
+honest, labeled fallbacks (heuristic classifier, provisional state-machine referee).
+
+Run the game:
+
+```sh
+npm install
+NEMOTRON_LIVE=1 NVIDIA_API_KEY=... npm start   # live models
+npm start                                       # offline-safe default
+```
+
+## Evidence (honest labels)
+
+- **All numbers below are OFFLINE unless a live run says otherwise.** Do not claim
+  live-model results until `python3 nemotron/eval.py --live` has actually run.
+- Referee: provisional state machine agrees with its own authored fixtures 50/50 —
+  a regression check, not independent evaluation. The 50 fixtures are synthetic and
+  **0 have been human-reviewed**; `nemotron/REVIEW_NOTES.md` is a non-authoritative
+  AI pre-review only.
+- Classifier: heuristic baseline 43/50 (86%) on synthetic swings; known drop→dink
+  confusion (low acceleration + low wrist overlap). 0/100 required human swings captured.
+- `nemotron/rules.json` now holds verbatim 2026 USA Pickleball Official Rulebook text,
+  but `reviewed_by` is EMPTY — two humans must still verify it before any citation
+  is trustworthy. The referee adapter refuses placeholder/unreviewed config.
+- In-game rulings before that review are labeled **provisional** in the HUD.
+
+See `server/INTEGRATION_NOTES.md` for architecture, timeouts, and guardrails, and
+`DEMO_SCRIPT.md` for the 90-second SteelHacks demo.
+
+---
+
 # Pickleball On The Go — Milestone 1
 
 The relay owns the ball simulation. The laptop renders the relay’s state, and the phone sends the fixed section-3 `swing` message. The fastest way to check the connection is the phone page’s **Send test swing** button; it does not need motion permission and should launch the ball on the laptop.
@@ -65,13 +102,3 @@ Phone motion needs a 2.5g start and a 600ms quiet recovery. Pitch has less influ
 On the laptop, click **Enable camera**, allow access, and stand still with shoulders and hips visible for calibration. A circle in the court map shows your estimated location, a ground ring marks your feet, and the view follows the server's position estimate. **Recenter position** resets the calibration. If tracking is lost or disabled, the last position is held. Video is processed locally; only pose coordinates go to the relay. The phone still measures swings.
 
 Position uses hip midpoint and shoulder size; depth is approximate and turning your body can affect it. This is not room-scale position measurement. The tracker uses the MediaPipe library already named in the design and its lite pose model, following the [official Web guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js). The first camera start needs internet to load the CDN library/model.
-
-## DTW swing types and Last shot telemetry
-
-Restart with `npm start` and refresh both pages. On the phone, enable motion, hold still until IDLE, then use **Record forehand**, **Record backhand**, and **Record smash**. Perform one deliberate swing after each button and finish still. These training swings do not launch a ball. Templates stay in this phone browser's local storage for this server address; changing the LAN address or clearing browser data requires recording again. Keep the same grip and phone orientation, and re-record a template if matching is poor.
-
-Spawn a ball and swing normally. **Last shot** on the laptop shows only the detected shot type and virtual ball launch speed in mph, in the original compact layout. Missed swings show no launch speed. Physical phone speed in m/s is not estimated from acceleration.
-
-The dependency-free classifier resamples six sensor channels (three acceleration and three rotation axes), normalizes their amplitude, and uses banded Dynamic Time Warping to compare motion shape despite differing durations and local timing. It requires all three templates and rejects incomplete, distant, or ambiguous matches as unknown. DTW is tolerant of timing changes, not a guarantee of accuracy or complete speed independence. Match separation is not an accuracy percentage. Automated fixtures cover 0.3s/0.7s variants; real-world accuracy still needs testing with your recorded swings.
-
-Contact still launches immediately. Classification follows after the short follow-through and does not change ball physics. Raw motion traces stay on the phone. The original swing/state/pose/ruling schemas remain unchanged: supplemental `swing_analysis` messages contain a timestamp and bounded summary; server `shot` reports include a sequence id, accepted/rejected outcome, original swing, launch speed/angle, and analysis. Analysis attaches only to the matching timestamp on the originating socket; late results cannot replace a newer Last shot.

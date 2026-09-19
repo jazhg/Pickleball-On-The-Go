@@ -12,12 +12,29 @@ export function speedFromPeak(peak, calibration = CONFIG.calibration) {
 }
 
 export class Simulation {
-  constructor(config = CONFIG) { this.config = config; this.pose = null; this.reset(); }
+  constructor(config = CONFIG) {
+    this.config = config; this.pose = null;
+    // Match state survives rally resets; reset() only clears the in-flight rally.
+    this.score = [0, 0]; this.servingTeam = 'A';
+    this.reset();
+  }
   reset() {
     const p = this.config.player;
     this.ball = { x: p.x, y: p.paddleHeight, z: p.feedZ, vx: 0, vy: 0, vz: 0 };
     this.phase = 'idle'; this.bounces = 0; this.age = 0; this.resetIn = 0;
-    this.events = []; this.score = [0, 0]; this.server = 1;
+    this.events = [];
+  }
+  // Wall bot ("B"): one return of the first in-bounds far-side bounce, ~0.35 s later,
+  // so a solo player gets a real rally loop. A demo stand-in, not sensed input.
+  botReturn() {
+    if (this.phase !== 'rally') return false;
+    const flight = 1.2;
+    const targetX = (Math.random() * 2 - 1) * 1.2, targetZ = 3.0;
+    this.ball.vx = (targetX - this.ball.x) / flight;
+    this.ball.vz = (targetZ - this.ball.z) / flight;
+    this.ball.vy = (this.config.physics.ballRadius - this.ball.y) / flight + this.config.physics.gravity * flight / 2;
+    this.events.push({ type: 'contact', player: 'B', time: this.age, ball: { ...this.ball } });
+    return true;
   }
   spawn() {
     if (this.phase !== 'idle') return false;
@@ -43,7 +60,7 @@ export class Simulation {
     return this.pose ? { x: this.pose.court_x, y: this.pose.wrist_h, z: this.pose.court_y }
       : { x: p.x, y: p.paddleHeight, z: p.z };
   }
-  swing(swing, directionAngle) {
+  swing(swing) {
     if (this.phase !== 'ready') return false;
     const ball = this.ball, paddle = this.paddle(), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
@@ -52,20 +69,13 @@ export class Simulation {
     const facePitch = Math.asin(Math.sin(radians(swing.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const directed = Number.isFinite(directionAngle);
-    const azimuth = radians(clamp(directed ? directionAngle : (this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const azimuth = radians(clamp((this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
     const raw = { vx: Math.sin(azimuth) * horizontal, vy: Math.sin(elevation) * speed, vz: -Math.cos(azimuth) * horizontal };
     const targetX = Math.sign(swing.roll || 1) * c.targetX;
     const flight = Math.max(c.minimumTargetFlightSeconds, Math.hypot(targetX - ball.x, c.targetZ - ball.z) / horizontal);
     const aimed = { vx: (targetX - ball.x) / flight, vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2, vz: (c.targetZ - ball.z) / flight };
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] = raw[axis] * (1 - c.aimAssist) + aimed[axis] * c.aimAssist;
-    // Preserve gentle vertical assistance but never let the old fixed side
-    // target override calibrated left/center/right, even off court center.
-    if (directed) {
-      ball.vx = raw.vx;
-      ball.vz = raw.vz;
-    }
     const magnitude = Math.hypot(ball.vx, ball.vy, ball.vz);
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;
@@ -107,5 +117,10 @@ export class Simulation {
     }
     if (this.phase === 'rally' && this.age >= this.config.simulation.maxFlightSeconds) this.finish('timeout');
   }
-  state(t = Date.now()) { return { t, type: 'state', ball: { ...this.ball }, score: [...this.score], server: this.server, phase: this.phase }; }
+  state(t = Date.now()) {
+    // Singles serving state is tracked as A/B internally and exposed through the
+    // existing 1/2 server numbers so the fixed wire schema never changes.
+    const server = this.servingTeam === 'A' ? 1 : 2;
+    return { t, type: 'state', ball: { ...this.ball }, score: [...this.score], server, phase: this.phase };
+  }
 }

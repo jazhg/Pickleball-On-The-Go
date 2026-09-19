@@ -1,7 +1,6 @@
 import { CONFIG } from '/shared/config.js';
+import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
-import { validShot } from '/shared/shot-telemetry.js';
-import { describeShot } from './shot-view.js';
 
 // The laptop renders server snapshots. There is deliberately no ball simulation here.
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
@@ -10,7 +9,73 @@ const ui = Object.fromEntries([
   'server-number', 'serve-a', 'serve-b', 'phase-dot', 'phase-title',
   'phase-description', 'swing-button', 'swing-hint', 'last-shot',
   'last-shot-detail', 'last-ruling', 'shot-count', 'shot-flash', 'transport-note',
+  'voice-toggle', 'evidence-panel', 'evidence-rule', 'evidence-events',
+  'evidence-shot', 'analytics-strip',
 ].map((id) => [id, document.getElementById(id)]));
+
+// --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
+let voiceMuted = false;
+let classifyTimer = null;
+const analytics = { shots: {}, confSum: 0, confN: 0, rallies: 0, errors: 0 };
+
+const RULE_WORDS = {
+  rally_outcome: 'rally over', serve_foot: 'serve foot fault', serve_height: 'serve too high',
+  serve_motion: 'illegal serve motion', serve_paddle: 'paddle above the wrist',
+  serve_target: 'serve off target', serve_kitchen: 'serve into the kitchen',
+  two_bounce: 'two bounce rule', nvz_volley: 'kitchen volley', nvz_momentum: 'kitchen momentum',
+};
+
+function speakRuling(message) {
+  if (voiceMuted || !('speechSynthesis' in window)) return;
+  const words = RULE_WORDS[message.rule] || String(message.rule).replace(/_/g, ' ');
+  const text = message.fault
+    ? `Fault. Player ${message.player}. ${words}.`
+    : 'No fault. Play on.';
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+
+ui['voice-toggle'].addEventListener('click', () => {
+  voiceMuted = !voiceMuted;
+  ui['voice-toggle'].textContent = voiceMuted ? '🔇 Voice off' : '🔊 Voice on';
+  if (voiceMuted && 'speechSynthesis' in window) speechSynthesis.cancel();
+});
+
+function renderAnalytics() {
+  const entries = Object.entries(analytics.shots);
+  const avg = analytics.confN ? Math.round(analytics.confSum / analytics.confN * 100) : 0;
+  ui['analytics-strip'].textContent = entries.length
+    ? `${entries.map(([shot, n]) => `${shot} ${n}`).join(' · ')} — avg confidence ${avg}% · unforced errors ${analytics.errors}/${analytics.rallies} rallies`
+    : 'No shots classified yet.';
+}
+
+function receiveClassification(message) {
+  if (!validMessage(message)) return;
+  clearTimeout(classifyTimer);
+  const detail = message.path === 'heuristic' ? 'heuristic fallback · offline'
+    : message.path === 'model' ? 'Nemotron live' : `${message.path} path`;
+  ui['last-shot'].textContent = `${message.shot} → ${message.target_zone.replace(/_/g, ' ')}`;
+  ui['last-shot-detail'].textContent = `Confidence ${(message.confidence * 100).toFixed(0)}% · ${detail}.`;
+  analytics.shots[message.shot] = (analytics.shots[message.shot] || 0) + 1;
+  analytics.confSum += message.confidence;
+  analytics.confN += 1;
+  renderAnalytics();
+}
+
+function receiveRulingEvidence(message) {
+  if (!validMessage(message)) return;
+  ui['evidence-panel'].hidden = false;
+  ui['evidence-rule'].textContent = `Rule cited: ${message.rule}${message.provisional ? ' (provisional — not a reviewed rulebook citation)' : ''} · path: ${message.path}`;
+  ui['evidence-events'].replaceChildren(...message.trigger_events.map((e) => {
+    const li = document.createElement('li');
+    li.textContent = `${e.t}ms — ${e.label}`;
+    return li;
+  }));
+  const shot = message.preceding_shot;
+  ui['evidence-shot'].textContent = shot
+    ? `Preceding shot: ${shot.shot} → ${shot.target_zone.replace(/_/g, ' ')} · ${(shot.confidence * 100).toFixed(0)}% confidence`
+    : 'Preceding shot: none recorded.';
+}
 
 let socket;
 let latestState = null;
@@ -23,19 +88,6 @@ let launches = 0;
 let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
-let lastShotId = 0, analysisTimer;
-function receiveShot(report) {
-  if (!validShot(report) || report.id < lastShotId) return;
-  lastShotId = report.id;
-  clearTimeout(analysisTimer);
-  const view = describeShot(report);
-  ui['last-shot'].textContent = view.title;
-  ui['last-shot-detail'].textContent = view.detail;
-  ui['shot-count'].textContent = `#${report.id}`;
-  if (!report.analysis) analysisTimer = setTimeout(() => {
-    if (lastShotId === report.id) ui['last-shot'].textContent = 'Unknown';
-  }, CONFIG.dtw.analysisTimeoutMs + 500);
-}
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.z };
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', async () => {
@@ -116,6 +168,20 @@ function receiveState(state) {
   const previousPhase = latestState?.phase;
   if (state.phase === 'rally' && previousPhase === 'ready') {
     launches += 1;
+    ui['last-shot'].textContent = 'Classifying…';
+    ui['last-shot-detail'].textContent = Date.now() - localSwingAt < 1500
+      ? `Synthetic swing · ${CONFIG.swing.synthetic.peak_g.toFixed(1)}g`
+      : 'Remote swing received by the server.';
+    // If the classifier child dies, never hang on "Classifying…": the next
+    // swing resets it, and this timer clears it after a short wait.
+    clearTimeout(classifyTimer);
+    classifyTimer = setTimeout(() => {
+      if (ui['last-shot'].textContent === 'Classifying…') {
+        ui['last-shot'].textContent = 'Unclassified';
+        ui['last-shot-detail'].textContent = 'Classifier unavailable for this swing.';
+      }
+    }, 2000);
+    ui['shot-count'].textContent = `#${String(launches).padStart(2, '0')}`;
     ui['shot-flash'].classList.add('visible');
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => ui['shot-flash'].classList.remove('visible'), 900);
@@ -140,6 +206,10 @@ function receiveRuling(message) {
   ui['last-ruling'].textContent = `${message.fault ? `Fault${message.player ? ` · Player ${message.player}` : ''}` : 'No fault'}${reference}. ${message.explanation}`;
   ui['score-a'].textContent = String(message.score[0]).padStart(2, '0');
   ui['score-b'].textContent = String(message.score[1]).padStart(2, '0');
+  analytics.rallies += 1;
+  if (message.fault && message.player === 'A') analytics.errors += 1;
+  renderAnalytics();
+  speakRuling(message);
 }
 
 function connect() {
@@ -150,7 +220,6 @@ function connect() {
   url.searchParams.set('role', 'laptop');
   socket = new WebSocket(url);
   socket.addEventListener('open', () => {
-    lastShotId = 0; clearTimeout(analysisTimer);
     reconnectAttempt = 0;
     latestState = null;
     court?.clearTrail();
@@ -162,9 +231,10 @@ function connect() {
     try { message = JSON.parse(event.data); } catch { return; }
     if (!message || typeof message !== 'object') return;
     if (isState(message)) receiveState(message);
-    else if (message.type === 'shot') receiveShot(message);
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
+    else if (message.type === 'classification') receiveClassification(message);
+    else if (message.type === 'ruling_evidence') receiveRulingEvidence(message);
   });
   socket.addEventListener('close', () => {
     setConnection('Connection lost', 'disconnected');

@@ -9,14 +9,73 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { CONFIG } from '../shared/config.js';
 import { parseMessage } from '../shared/protocol.js';
 import { Simulation } from './physics.js';
-import { parseAnalysis, emptyAnalysis } from '../shared/shot-telemetry.js';
-import { parseDirectedSwing } from '../shared/direction.js';
+import { adjudicateRally, classifySwing, validateRulingForApply } from './nemotron-bridge.js';
+
+// Translate authoritative sim events into fixture-style referee events so the
+// Nemotron referee judges the same shape it was evaluated on.
+export function buildRallyEnvelope(sim) {
+  const events = [];
+  let lastHitter = null, serveLogged = false;
+  for (const e of sim.events) {
+    const t = Math.round(e.time * 1000);
+    if (e.type === 'contact') {
+      lastHitter = e.player;
+      if (!serveLogged && e.player === 'A') {
+        // Serve-motion predicates are assumed compliant, not sensed; documented caveat.
+        events.push({ event: 'serve', player: 'A', method: 'volley', foot_legal: true,
+          contact_above_waist: false, upward_motion: true, paddle_below_wrist: true, t });
+        serveLogged = true;
+      } else {
+        events.push({ event: 'hit', player: e.player, id: `h${events.length}`, volley: false, t });
+      }
+    } else if (e.type === 'bounce') {
+      events.push({ event: 'bounce', player: e.z < 0 ? 'B' : 'A',
+        x: +e.x.toFixed(3), z: +e.z.toFixed(3), t });
+    } else if (e.type === 'rally_end') {
+      if (e.reason === 'two_bounces') {
+        const lastBounce = [...events].reverse().find((x) => x.event === 'bounce');
+        const loser = lastBounce ? lastBounce.player : (lastHitter === 'A' ? 'B' : 'A');
+        events.push({ event: 'fault', player: loser, t });
+      } else if (e.reason === 'out') {
+        events.push({ event: 'fault', player: lastHitter || 'A', t });
+      }
+      // 'timeout' carries no fault: the referee replays the point, score untouched.
+    }
+  }
+  return {
+    events,
+    game_state: {
+      score: [...sim.score],
+      serving_team: sim.servingTeam,
+      server_number: 1,
+      scoring_mode: 'singles',
+    },
+  };
+}
+
+// Human-readable timeline for the judges' evidence panel ("explain this call").
+export function describeEvents(fixtureEvents) {
+  return fixtureEvents.map((e) => {
+    const t = e.t;
+    if (e.event === 'serve') return { label: `Serve · Player ${e.player}`, t };
+    if (e.event === 'bounce') return { label: `Bounce · ${e.player === 'B' ? 'far side' : 'your side'} (${e.x.toFixed(1)}, ${e.z.toFixed(1)})`, t };
+    if (e.event === 'hit') return { label: `Return · Player ${e.player}`, t };
+    if (e.event === 'fault') return { label: `Fault recorded · Player ${e.player}`, t };
+    return { label: e.event, t };
+  });
+}
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
   const sim = new Simulation();
-  let lastShot = null, shotSequence = 0;
+  let lastClassification = null; // most recent shot, for the evidence panel
+  const sendToLaptops = (obj) => {
+    const text = JSON.stringify(obj);
+    for (const client of hub.clients) {
+      if (client.role === 'laptop' && client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(text);
+    }
+  };
   const handler = async (req, res) => {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Permissions-Policy': 'accelerometer=(self), gyroscope=(self)' };
     // Explicit user action over HTTP; existing section-3 WebSocket schemas stay fixed.
@@ -63,10 +122,6 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     server = https.createServer({ key, cert }, handler);
   }
   const hub = new WebSocketServer({ noServer: true, maxPayload: CONFIG.network.maxPayloadBytes });
-  const publishShot = shot => {
-    const message = JSON.stringify(shot);
-    for (const client of hub.clients) if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(message);
-  };
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
     let sameOrigin = false;
@@ -80,41 +135,30 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   });
   hub.on('connection', ws => {
     ws.isAlive = true; ws.lastSwing = -Infinity;
-    ws.shots = new Map();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
     ws.send(JSON.stringify(sim.state()));
     if (sim.pose) ws.send(JSON.stringify(sim.pose));
-    if (lastShot) ws.send(JSON.stringify(lastShot));
     ws.on('message', (data, binary) => {
       if (binary) return;
-      const directed = ws.role === 'phone' ? parseDirectedSwing(data) : null;
-      const msg = directed?.swing || parseMessage(data);
-      if (!msg) {
-        const update = parseAnalysis(data);
-        if (!update || ws.role !== 'phone') return;
-        const shot = ws.shots.get(update.t);
-        if (!shot || shot.analysis !== null) return;
-        shot.analysis = update.analysis;
-        // Older analyses may finish late: never overwrite a newer Last shot.
-        if (lastShot?.id === shot.id) publishShot(shot);
-        return;
-      }
+      const msg = parseMessage(data);
+      if (!msg) return;
       if (msg.type === 'swing') {
         const now = performance.now();
-        if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs || ws.shots.has(msg.t)) return;
+        if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs) return;
         ws.lastSwing = now;
-        const phase = sim.phase;
-        const accepted = sim.swing(msg, directed?.angle);
-        const ball = sim.ball;
-        lastShot = { type: 'shot', id: ++shotSequence, t: msg.t, source: ws.role, accepted,
-          reason: accepted ? 'contact' : phase === 'idle' ? 'no_ball' : phase === 'ready' ? 'missed' : 'busy',
-          swing: { ...msg }, launch_speed_mps: accepted ? Math.hypot(ball.vx, ball.vy, ball.vz) : null,
-          launch_angle_deg: accepted ? Math.atan2(ball.vy, Math.hypot(ball.vx, ball.vz)) * 180 / Math.PI : null,
-          analysis: ws.role === 'laptop' ? emptyAnalysis('synthetic', msg.peak_g) : null };
-        ws.shots.set(msg.t, lastShot);
-        if (ws.shots.size > 8) ws.shots.delete(ws.shots.keys().next().value);
-        publishShot(lastShot);
+        const accepted = sim.swing(msg);
+        if (accepted) {
+          // Physics launches immediately; classification runs async and must never
+          // block the 120 Hz sim loop. The bridge always resolves (fallback included).
+          const pose = sim.pose ? { wrist_h: sim.pose.wrist_h, phase: sim.phase } : {};
+          classifySwing(msg, pose).then((result) => {
+            const c = result.classification;
+            lastClassification = { shot: c.shot, target_zone: c.target_zone, confidence: c.confidence };
+            sendToLaptops({ t: Date.now(), type: 'classification', shot: c.shot,
+              target_zone: c.target_zone, confidence: c.confidence, path: result.path });
+          }).catch(() => {});
+        }
         console.log(`[${ws.role}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
         sim.setPose(msg);
@@ -125,11 +169,48 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   });
   let previous = performance.now(), accumulator = 0;
   const step = 1 / CONFIG.simulation.hz;
+  let prevPhase = sim.phase;
+  let botScheduled = false, botTimer = null;
+  const onRallyComplete = async () => {
+    // Adjudication is async and never blocks the sim; a missing or malformed
+    // ruling leaves the score untouched (offline-safe default).
+    const envelope = buildRallyEnvelope(sim);
+    const shotAtRallyEnd = lastClassification; // snapshot: a fast next swing must not rewrite this rally's evidence
+    let response = null;
+    try { response = await adjudicateRally(envelope.events, envelope.game_state); }
+    catch (error) { console.warn('[nemotron] referee bridge failed:', error.message); }
+    if (!response || !response.ruling) return;
+    const ruling = validateRulingForApply(response.ruling, sim.score);
+    if (!ruling) { console.warn('[nemotron] ruling rejected by score guard'); return; }
+    sim.score = [...ruling.score];
+    if (ruling.side_out) sim.servingTeam = sim.servingTeam === 'A' ? 'B' : 'A';
+    sendToLaptops({ type: 'ruling', fault: ruling.fault, player: ruling.player,
+      rule: ruling.rule, explanation: ruling.explanation, score: [...ruling.score], side_out: ruling.side_out });
+    sendToLaptops({ t: Date.now(), type: 'ruling_evidence', rule: ruling.rule,
+      provisional: response.provisional !== false, path: response.path || 'unknown',
+      trigger_events: describeEvents(envelope.events), preceding_shot: shotAtRallyEnd });
+  };
   const tick = setInterval(() => {
     const now = performance.now();
     accumulator += Math.min((now - previous) / 1000, CONFIG.simulation.maxCatchupSeconds);
     previous = now;
     while (accumulator >= step) { sim.step(step); accumulator -= step; }
+    if (sim.phase !== prevPhase) {
+      if (sim.phase === 'rally') botScheduled = false;
+      if (prevPhase === 'rally' && sim.phase === 'reset') {
+        if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+        onRallyComplete();
+      }
+      prevPhase = sim.phase;
+    }
+    // Wall bot: return the first in-bounds far-side bounce after ~0.35 s.
+    if (sim.phase === 'rally' && !botScheduled) {
+      const landed = sim.events.some((e) => e.type === 'bounce' && e.in_bounds && e.z < 0);
+      if (landed) {
+        botScheduled = true;
+        botTimer = setTimeout(() => { botTimer = null; sim.botReturn(); }, 350);
+      }
+    }
   }, 1000 / CONFIG.simulation.hz);
   const broadcast = setInterval(() => {
     const state = JSON.stringify(sim.state());
