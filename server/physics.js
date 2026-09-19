@@ -43,7 +43,7 @@ export class Simulation {
     return this.pose ? { x: this.pose.court_x, y: this.pose.wrist_h, z: this.pose.court_y }
       : { x: p.x, y: p.paddleHeight, z: p.z };
   }
-  swing(swing) {
+  swing(swing, directionAngle) {
     if (this.phase !== 'ready') return false;
     const ball = this.ball, paddle = this.paddle(), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
@@ -52,13 +52,20 @@ export class Simulation {
     const facePitch = Math.asin(Math.sin(radians(swing.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = radians(clamp((this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const directed = Number.isFinite(directionAngle);
+    const azimuth = radians(clamp(directed ? directionAngle : (this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
     const raw = { vx: Math.sin(azimuth) * horizontal, vy: Math.sin(elevation) * speed, vz: -Math.cos(azimuth) * horizontal };
     const targetX = Math.sign(swing.roll || 1) * c.targetX;
     const flight = Math.max(c.minimumTargetFlightSeconds, Math.hypot(targetX - ball.x, c.targetZ - ball.z) / horizontal);
     const aimed = { vx: (targetX - ball.x) / flight, vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2, vz: (c.targetZ - ball.z) / flight };
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] = raw[axis] * (1 - c.aimAssist) + aimed[axis] * c.aimAssist;
+    // Preserve gentle vertical assistance but never let the old fixed side
+    // target override calibrated left/center/right, even off court center.
+    if (directed) {
+      ball.vx = raw.vx;
+      ball.vz = raw.vz;
+    }
     const magnitude = Math.hypot(ball.vx, ball.vy, ball.vz);
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;

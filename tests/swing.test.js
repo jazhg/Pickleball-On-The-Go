@@ -37,6 +37,12 @@ test('still samples establish a flat reference, then one reversal emits one swin
   assert.equal(events[0].type, 'swing');
   assert.ok(events[0].peak_g > CONFIG.swing.startG);
   assert.equal(detector.readings.state, 'FOLLOW');
+  const completed = detector.takeCompletedSwing();
+  assert.deepEqual(completed.swing, events[0]);
+  assert.ok(completed.samples.length >= CONFIG.dtw.minSamples);
+  assert.ok(completed.samples[0].t < events[0].t);
+  assert.ok(completed.samples.at(-1).t > events[0].t);
+  assert.equal(detector.takeCompletedSwing(), null);
 });
 
 test('calibration requires increasing soft, medium, hard peaks and maps to canonical anchors', () => {

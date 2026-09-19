@@ -1,5 +1,7 @@
 import { CONFIG } from '/shared/config.js';
 import { setupTracking } from './tracking.js';
+import { validShot } from '/shared/shot-telemetry.js';
+import { describeShot } from './shot-view.js';
 
 // The laptop renders server snapshots. There is deliberately no ball simulation here.
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
@@ -21,6 +23,19 @@ let launches = 0;
 let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
+let lastShotId = 0, analysisTimer;
+function receiveShot(report) {
+  if (!validShot(report) || report.id < lastShotId) return;
+  lastShotId = report.id;
+  clearTimeout(analysisTimer);
+  const view = describeShot(report);
+  ui['last-shot'].textContent = view.title;
+  ui['last-shot-detail'].textContent = view.detail;
+  ui['shot-count'].textContent = `#${report.id}`;
+  if (!report.analysis) analysisTimer = setTimeout(() => {
+    if (lastShotId === report.id) ui['last-shot'].textContent = 'Unknown';
+  }, CONFIG.dtw.analysisTimeoutMs + 500);
+}
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.z };
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', async () => {
@@ -101,11 +116,6 @@ function receiveState(state) {
   const previousPhase = latestState?.phase;
   if (state.phase === 'rally' && previousPhase === 'ready') {
     launches += 1;
-    ui['last-shot'].textContent = 'Unclassified · milestone 1';
-    ui['last-shot-detail'].textContent = Date.now() - localSwingAt < 1500
-      ? `Synthetic swing · ${CONFIG.swing.synthetic.peak_g.toFixed(1)}g`
-      : 'Remote swing received by the server.';
-    ui['shot-count'].textContent = `#${String(launches).padStart(2, '0')}`;
     ui['shot-flash'].classList.add('visible');
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => ui['shot-flash'].classList.remove('visible'), 900);
@@ -140,6 +150,7 @@ function connect() {
   url.searchParams.set('role', 'laptop');
   socket = new WebSocket(url);
   socket.addEventListener('open', () => {
+    lastShotId = 0; clearTimeout(analysisTimer);
     reconnectAttempt = 0;
     latestState = null;
     court?.clearTrail();
@@ -151,6 +162,7 @@ function connect() {
     try { message = JSON.parse(event.data); } catch { return; }
     if (!message || typeof message !== 'object') return;
     if (isState(message)) receiveState(message);
+    else if (message.type === 'shot') receiveShot(message);
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
   });

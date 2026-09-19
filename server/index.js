@@ -9,11 +9,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { CONFIG } from '../shared/config.js';
 import { parseMessage } from '../shared/protocol.js';
 import { Simulation } from './physics.js';
+import { parseAnalysis, emptyAnalysis } from '../shared/shot-telemetry.js';
+import { parseDirectedSwing } from '../shared/direction.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
   const sim = new Simulation();
+  let lastShot = null, shotSequence = 0;
   const handler = async (req, res) => {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Permissions-Policy': 'accelerometer=(self), gyroscope=(self)' };
     // Explicit user action over HTTP; existing section-3 WebSocket schemas stay fixed.
@@ -60,6 +63,10 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     server = https.createServer({ key, cert }, handler);
   }
   const hub = new WebSocketServer({ noServer: true, maxPayload: CONFIG.network.maxPayloadBytes });
+  const publishShot = shot => {
+    const message = JSON.stringify(shot);
+    for (const client of hub.clients) if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(message);
+  };
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
     let sameOrigin = false;
@@ -73,19 +80,41 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   });
   hub.on('connection', ws => {
     ws.isAlive = true; ws.lastSwing = -Infinity;
+    ws.shots = new Map();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
     ws.send(JSON.stringify(sim.state()));
     if (sim.pose) ws.send(JSON.stringify(sim.pose));
+    if (lastShot) ws.send(JSON.stringify(lastShot));
     ws.on('message', (data, binary) => {
       if (binary) return;
-      const msg = parseMessage(data);
-      if (!msg) return;
+      const directed = ws.role === 'phone' ? parseDirectedSwing(data) : null;
+      const msg = directed?.swing || parseMessage(data);
+      if (!msg) {
+        const update = parseAnalysis(data);
+        if (!update || ws.role !== 'phone') return;
+        const shot = ws.shots.get(update.t);
+        if (!shot || shot.analysis !== null) return;
+        shot.analysis = update.analysis;
+        // Older analyses may finish late: never overwrite a newer Last shot.
+        if (lastShot?.id === shot.id) publishShot(shot);
+        return;
+      }
       if (msg.type === 'swing') {
         const now = performance.now();
-        if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs) return;
+        if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs || ws.shots.has(msg.t)) return;
         ws.lastSwing = now;
-        const accepted = sim.swing(msg);
+        const phase = sim.phase;
+        const accepted = sim.swing(msg, directed?.angle);
+        const ball = sim.ball;
+        lastShot = { type: 'shot', id: ++shotSequence, t: msg.t, source: ws.role, accepted,
+          reason: accepted ? 'contact' : phase === 'idle' ? 'no_ball' : phase === 'ready' ? 'missed' : 'busy',
+          swing: { ...msg }, launch_speed_mps: accepted ? Math.hypot(ball.vx, ball.vy, ball.vz) : null,
+          launch_angle_deg: accepted ? Math.atan2(ball.vy, Math.hypot(ball.vx, ball.vz)) * 180 / Math.PI : null,
+          analysis: ws.role === 'laptop' ? emptyAnalysis('synthetic', msg.peak_g) : null };
+        ws.shots.set(msg.t, lastShot);
+        if (ws.shots.size > 8) ws.shots.delete(ws.shots.keys().next().value);
+        publishShot(lastShot);
         console.log(`[${ws.role}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
         sim.setPose(msg);

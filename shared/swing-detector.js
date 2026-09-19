@@ -49,6 +49,16 @@ export class SwingDetector {
     this.dominantAxis = null;
     this.peakSign = 0;
     this.yawRate = 0;
+    this.preRoll = []; this.trace = []; this.contactSwing = null; this.completedSwing = null; this.traceOverflow = false;
+  }
+
+  takeCompletedSwing() {
+    const result = this.completedSwing; this.completedSwing = null; return result;
+  }
+
+  completeTrace() {
+    if (this.contactSwing) this.completedSwing = { swing: this.contactSwing, samples: this.traceOverflow ? [] : this.trace.slice() };
+    this.contactSwing = null; this.trace = [];
   }
 
   setReference(reference) {
@@ -109,11 +119,22 @@ export class SwingDetector {
     }
     if (!this.gravity || !this.referenceCaptured) return null;
     const linear = Object.fromEntries(axes.map(axis => [axis, (acceleration[axis] - this.gravity[axis]) / physics.gravity]));
+    const sample = { t, ax: linear.x, ay: linear.y, az: linear.z, gx: gyro.alpha, gy: gyro.beta, gz: gyro.gamma };
+    if (this.state === 'IDLE') {
+      this.preRoll.push(sample);
+      this.preRoll = this.preRoll.filter(s => t - s.t <= this.config.dtw.preRollMs);
+    } else if (this.state === 'BACKSWING' || this.state === 'CONTACT') {
+      // If a device exceeds the bounded trace capacity, the partial trace is
+      // rejected by matching instead of growing indefinitely.
+      if (this.trace.length < this.config.dtw.maxSamples) this.trace.push(sample);
+      else this.traceOverflow = true;
+    }
 
     if (this.state === 'IDLE') {
       if (this.magnitudeG > swing.startG) {
         this.state = 'BACKSWING';
         this.startT = t;
+        this.trace = this.preRoll.slice(); this.preRoll = []; this.contactSwing = null; this.traceOverflow = false;
         this.recordPeak(linear);
       }
       return null;
@@ -123,19 +144,22 @@ export class SwingDetector {
         // An unfinished motion gets the same refractory protection as a swing.
         this.state = 'FOLLOW';
         this.followT = t;
+        this.trace = []; this.contactSwing = null;
         return null;
       }
       if (this.magnitudeG > this.peakG) this.recordPeak(linear);
       const reversed = linear[this.dominantAxis] * this.peakSign < -swing.reversalG;
       if (t - this.startT >= swing.minWindowMs && this.peakG - this.magnitudeG >= swing.peakDecayG && reversed) {
         this.state = 'CONTACT';
-        return { t, type: 'swing', peak_g: this.peakG, pitch: this.pitch, roll: this.roll,
+        this.contactSwing = { t, type: 'swing', peak_g: this.peakG, pitch: this.pitch, roll: this.roll,
           yaw_rate: this.yawRate, duration_ms: t - this.startT };
+        return { ...this.contactSwing };
       }
       return null;
     }
     if (this.state === 'CONTACT') {
       if (this.magnitudeG < swing.endG || t - this.startT > swing.maxWindowMs) {
+        this.completeTrace();
         this.state = 'FOLLOW';
         this.followT = t;
       }
