@@ -1,0 +1,87 @@
+{
+  "id": "24_two_bounce",
+  "category": "two_bounce",
+  "name": "Server volleys the return",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": false,
+  "game_state": {
+    "score": [
+      6,
+      4
+    ],
+    "serving_team": "A",
+    "server_number": 1,
+    "scoring_mode": "singles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "volley",
+      "foot_legal": true,
+      "contact_above_waist": false,
+      "upward_motion": true,
+      "paddle_below_wrist": true,
+      "t": 1000
+    },
+    {
+      "event": "serve_landing",
+      "player": "B",
+      "correct_service_court": true,
+      "t": 1300
+    },
+    {
+      "event": "hit",
+      "player": "B",
+      "id": "return",
+      "volley": false,
+      "t": 1600
+    },
+    {
+      "event": "hit",
+      "player": "A",
+      "id": "v1",
+      "volley": true,
+      "t": 1900
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": true,
+    "player": "A",
+    "rule": "TODO:human-reviewed-citation",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      6,
+      4
+    ],
+    "side_out": true
+  },
+  "expected_rule_key": "two_bounce",
+  "expected_next_server": null,
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Verify every verdict and scoring assumption independently."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "drop",
+    "swing": {
+      "t": 1234591,
+      "type": "swing",
+      "peak_g": 1.9,
+      "pitch": 17,
+      "roll": 6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 0.7,
+      "phase": "rally",
+      "court_y": 2.9
+    }
+  }
+}

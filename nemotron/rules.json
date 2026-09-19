@@ -1,0 +1,12 @@
+{
+  "edition": "TODO: exact publication year and revision",
+  "source_url": "TODO: official USA Pickleball rulebook URL",
+  "reviewed_by": [],
+  "sections": [
+    {"topic": "two_bounce", "rule_ids": [], "text": "[PLACEHOLDER] Paste verbatim the two-bounce rule, definitions and relevant exceptions; do not invent IDs."},
+    {"topic": "non_volley_zone", "rule_ids": [], "text": "[PLACEHOLDER] Paste verbatim non-volley-zone contact and line rules, momentum, regained-balance and ball-dead provisions; do not invent IDs."},
+    {"topic": "serve", "rule_ids": [], "text": "[PLACEHOLDER] Paste verbatim volley/drop serve motion, contact, release, feet and landing rules, definitions and exceptions; do not invent IDs."},
+    {"topic": "scoring", "rule_ids": [], "text": "[PLACEHOLDER] Paste verbatim side-out scoring, singles/doubles service sequence, initial server exception and linked fault provisions; do not invent IDs."}
+  ],
+  "branch_rule_ids": {}
+}

@@ -1,0 +1,67 @@
+{
+  "id": "08_serve",
+  "category": "serve",
+  "name": "Legal drop serve ignores volley motion predicates",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": false,
+  "game_state": {
+    "score": [
+      6,
+      4
+    ],
+    "serving_team": "A",
+    "server_number": 1,
+    "scoring_mode": "singles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "drop",
+      "foot_legal": true,
+      "contact_above_waist": false,
+      "upward_motion": false,
+      "paddle_below_wrist": false,
+      "t": 1000
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": false,
+    "player": null,
+    "rule": "none",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      6,
+      4
+    ],
+    "side_out": false
+  },
+  "expected_rule_key": "none",
+  "expected_next_server": null,
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Check drop-serve exceptions and ensure the dropped-ball conditions are sufficient."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "dink",
+    "swing": {
+      "t": 1234575,
+      "type": "swing",
+      "peak_g": 1.8,
+      "pitch": 15,
+      "roll": 6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 0.7,
+      "phase": "rally",
+      "court_y": 2.9
+    }
+  }
+}
