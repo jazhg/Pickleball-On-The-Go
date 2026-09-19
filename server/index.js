@@ -78,16 +78,6 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   };
   const handler = async (req, res) => {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Permissions-Policy': 'accelerometer=(self), gyroscope=(self)' };
-    // Explicit user action over HTTP; existing section-3 WebSocket schemas stay fixed.
-    if (req.method === 'POST' && req.url === '/api/spawn') {
-      let sameOrigin = false;
-      try { const origin = new URL(req.headers.origin); sameOrigin = origin.host === req.headers.host && origin.protocol === (insecure ? 'http:' : 'https:'); } catch {}
-      if (!sameOrigin) { res.writeHead(403, headers); return res.end(); }
-      const accepted = sim.spawn();
-      res.writeHead(accepted ? 200 : 409, { ...headers, 'Content-Type': MIME['.json'] });
-      return res.end(JSON.stringify({ accepted, phase: sim.phase }));
-    }
-    if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); return res.end(); }
     let pathname;
     try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
     catch { res.writeHead(400, headers); return res.end('Invalid URL'); }
@@ -95,6 +85,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       res.writeHead(200, { ...headers, 'Content-Type': MIME['.json'] });
       return res.end(JSON.stringify({ ok: true, simulation_hz: CONFIG.simulation.hz, broadcast_hz: CONFIG.simulation.broadcastHz }));
     }
+    if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); return res.end(); }
     if (pathname === '/') { res.writeHead(302, { ...headers, Location: '/client-laptop/' }); return res.end(); }
     // Serve only public browser assets. Never expose certs, keys, logs or source env files.
     if (!/^\/(client-laptop|client-phone|shared)\//.test(pathname) || pathname.split('/').some(p => p.startsWith('.')) || pathname.includes('\\')) {
@@ -129,16 +120,34 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     if (url.pathname !== '/ws' || !['laptop', 'phone'].includes(url.searchParams.get('role')) || (req.headers.origin && !sameOrigin)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); socket.destroy(); return;
     }
+    const role = url.searchParams.get('role');
+    const requestedSeat = url.searchParams.get('seat');
+    const used = new Set([...hub.clients]
+      .filter(client => client.role === role && client.player)
+      .map(client => client.player));
+    const player = requestedSeat === 'A' || requestedSeat === 'B'
+      ? (used.has(requestedSeat) ? null : requestedSeat)
+      : ['A', 'B'].find(candidate => !used.has(candidate));
+    if (!player) {
+      socket.write('HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     hub.handleUpgrade(req, socket, head, ws => {
-      ws.role = url.searchParams.get('role'); hub.emit('connection', ws);
+      ws.role = role;
+      ws.player = player;
+      hub.emit('connection', ws);
     });
   });
   hub.on('connection', ws => {
     ws.isAlive = true; ws.lastSwing = -Infinity;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
-    ws.send(JSON.stringify(sim.state()));
-    if (sim.pose) ws.send(JSON.stringify(sim.pose));
+    const seat = ws.player || 'A';
+    ws.send(JSON.stringify({ type: 'hello', player: seat, role: ws.role }));
+    ws.send(JSON.stringify(sim.state(seat)));
+    const opponentPose = sim.players[seat === 'A' ? 'B' : 'A'];
+    if (opponentPose) ws.send(JSON.stringify({ ...opponentPose, type: 'pose' }));
     ws.on('message', (data, binary) => {
       if (binary) return;
       const msg = parseMessage(data);
@@ -147,7 +156,8 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         const now = performance.now();
         if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs) return;
         ws.lastSwing = now;
-        const accepted = sim.swing(msg);
+        const seat = ws.player || 'A';
+        const accepted = sim.swing(msg, seat);
         if (accepted) {
           // Physics launches immediately; classification runs async and must never
           // block the 120 Hz sim loop. The bridge always resolves (fallback included).
@@ -159,11 +169,17 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
               target_zone: c.target_zone, confidence: c.confidence, path: result.path });
           }).catch(() => {});
         }
-        console.log(`[${ws.role}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
+        console.log(`[${ws.role} ${seat}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
+      } else if (msg.type === 'spawn') {
+        sim.spawn(ws.player || 'A');
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
-        sim.setPose(msg);
-        const pose = JSON.stringify(sim.pose);
-        for (const client of hub.clients) if (client.role === 'laptop' && client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(pose);
+        const seat = ws.player || 'A';
+        sim.setPose(msg, seat);
+        const pose = JSON.stringify({ ...sim.players[seat], type: 'pose' });
+        for (const client of hub.clients) {
+          if (client === ws || client.role !== 'laptop' || client.readyState !== WebSocket.OPEN || client.bufferedAmount >= 65536) continue;
+          client.send(pose);
+        }
       }
     });
   });
@@ -213,8 +229,11 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     }
   }, 1000 / CONFIG.simulation.hz);
   const broadcast = setInterval(() => {
-    const state = JSON.stringify(sim.state());
-    for (const client of hub.clients) if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(state);
+    for (const client of hub.clients) {
+      if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 65536) continue;
+      const state = JSON.stringify(sim.state(client.player || 'A'));
+      client.send(state);
+    }
   }, 1000 / CONFIG.simulation.broadcastHz);
   const heartbeat = setInterval(() => {
     for (const ws of hub.clients) { if (!ws.isAlive) ws.terminate(); else { ws.isAlive = false; ws.ping(); } }

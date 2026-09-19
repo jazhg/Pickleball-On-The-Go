@@ -23,20 +23,35 @@ let calibrationMode = false;
 let practicePeaks = [];
 let practiceIndex = 0;
 let ballPhase = null;
+let localPlayer = null;
+let readyFor = null;
+let lastHitter = null;
 const spawnButton = $('spawn-button');
+function canSwingNow() {
+  if (!localPlayer) return false;
+  if (ballPhase === 'ready') return readyFor === localPlayer;
+  if (ballPhase === 'rally') return Boolean(lastHitter) && lastHitter !== localPlayer;
+  return false;
+}
 function updateBallControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
-  ui.synthetic.disabled = !connected || ballPhase !== 'ready';
+  ui.synthetic.disabled = !connected || !canSwingNow();
   spawnButton.disabled = !connected || ballPhase !== 'idle';
-  $('ball-status').textContent = !connected ? 'Connect to the court first.' : ({ idle: 'No ball yet. Tap Spawn ball.', ready: 'Ball ready. Make a deliberate swing.', rally: 'Ball in flight. Wait until the shot finishes.', reset: 'Shot finished. Wait for Spawn ball to become available.' }[ballPhase] || 'Waiting for court state…');
+  $('ball-status').textContent =
+    !connected ? 'Connect to the court first.'
+    : !localPlayer ? 'Waiting for your seat assignment…'
+    : canSwingNow() ? (ballPhase === 'ready' ? 'Ball ready. Make a deliberate swing.' : 'Ball incoming. Swing to return it.')
+    : ballPhase === 'idle' ? 'No ball yet. Tap Spawn ball.'
+    : ballPhase === 'ready' ? `Player ${readyFor} is serving. Wait for it to reach you.`
+    : ballPhase === 'rally' ? 'Your shot is in flight. Wait for the other side.'
+    : ballPhase === 'reset' ? 'Shot finished. Wait for Spawn ball to become available.'
+    : 'Waiting for court state…';
 }
-spawnButton.addEventListener('click', async () => {
+spawnButton.addEventListener('click', () => {
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
   spawnButton.disabled = true;
-  try {
-    const response = await fetch('/api/spawn', { method: 'POST' });
-    if (!response.ok) throw new Error('The court is busy. Wait for the shot to finish.');
-  } catch (error) { ui.sendDetail.textContent = error.message; }
-  finally { updateBallControls(); }
+  setTimeout(updateBallControls, 500);
 });
 
 function setConnection(title, detail, kind = '') {
@@ -50,6 +65,8 @@ function wireURL() {
   const url = new URL('/ws', window.location.href);
   url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('role', 'phone');
+  const seat = new URLSearchParams(window.location.search).get('seat');
+  if (seat === 'A' || seat === 'B') url.searchParams.set('seat', seat);
   return url;
 }
 
@@ -66,7 +83,22 @@ function connect() {
     ui.sendDetail.textContent = 'Spawn a ball first, then send a test swing or use motion.';
   });
   socket.addEventListener('message', event => {
-    try { const state = JSON.parse(event.data); if (state.type === 'state') { ballPhase = state.phase; updateBallControls(); } } catch {}
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg?.type === 'hello' && ['A', 'B'].includes(msg.player)) {
+      localPlayer = msg.player;
+      const badge = $('seat-badge');
+      badge.textContent = `PLAYER ${localPlayer}`;
+      badge.className = 'small-badge good';
+      updateBallControls();
+      return;
+    }
+    if (msg?.type === 'state') {
+      ballPhase = msg.phase;
+      readyFor = msg.ready_for ?? null;
+      lastHitter = msg.last_hitter ?? null;
+      updateBallControls();
+    }
   });
   socket.addEventListener('close', () => scheduleReconnect('The relay closed the connection.'));
   socket.addEventListener('error', () => setConnection('Cannot reach the laptop', `Check Wi-Fi and use ${window.location.protocol === 'https:' ? 'the printed HTTPS LAN URL' : 'HTTPS, not HTTP, on your phone.'}.`, 'error'));
@@ -190,7 +222,7 @@ function recordPractice(rawPeak) {
 function sendSwing(swing, synthetic) {
   const rawPeak = Number(swing.peak_g);
   if (!synthetic && calibrationMode) { recordPractice(rawPeak); return false; }
-  if (ballPhase !== 'ready') { ui.sendDetail.textContent = 'Swing ignored: spawn a ball and wait for Ball ready.'; return false; }
+  if (!canSwingNow()) { ui.sendDetail.textContent = 'Swing ignored: it is not your turn to hit.'; return false; }
   const peak = synthetic ? CONFIG.swing.synthetic.peak_g : calibratedPeakG(rawPeak, calibration, CONFIG);
   const message = { t: Date.now(), type: 'swing', peak_g: peak, pitch: Number(swing.pitch) || 0, roll: Number(swing.roll) || 0, yaw_rate: Number(swing.yaw_rate) || 0, duration_ms: Number(swing.duration_ms) || 1 };
   if (socket?.readyState !== WebSocket.OPEN) { ui.sendBadge.textContent = 'OFFLINE'; ui.sendBadge.className = 'small-badge bad'; ui.sendDetail.textContent = 'Swing detected, but the relay is not connected. Reconnect to the laptop and try again.'; return false; }

@@ -41,7 +41,7 @@
           </section>
 
           <aside class="session-panel" aria-label="Session controls and score">
-            <div class="session-heading"><span class="eyebrow">YOUR SESSION</span><span class="session-id">01 / PRACTICE</span></div>
+            <div class="session-heading"><span class="eyebrow">YOUR SESSION</span><span id="seat-badge" class="edition">CONNECTING…</span><span class="session-id">01 / PRACTICE</span></div>
             <div class="scoreboard" aria-label="Score"><div><span class="player-label">PLAYER A <i id="serve-a" class="serve-dot" title="Serving"></i></span><strong id="score-a">00</strong></div><span class="score-divider">:</span><div><span class="player-label">PLAYER B <i id="serve-b" class="serve-dot" title="Serving" hidden></i></span><strong id="score-b">00</strong></div></div>
             <div class="score-meta"><span>Server <b id="server-number">—</b></span><span>Single-direction loop</span></div>
 
@@ -70,6 +70,10 @@
           </aside>
         </div>
 
+        <div class="seat-links" style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:8px 0 12px;">
+          <a id="seat-a-link" href="#">Player A laptop</a>
+          <a id="seat-b-link" href="#">Player B laptop</a>
+        </div>
         <section class="getting-started" aria-label="Ways to play">
           <div class="start-title"><span class="eyebrow">PICK YOUR PADDLE</span><h2>You’re one swing away.</h2></div>
           <div class="input-option"><span class="step-number">01</span><div><h3>Try it with your keyboard</h3><p>Click Spawn ball, then press <kbd>space</kbd> to launch.<br />Request each new ball when you’re ready.</p></div></div>

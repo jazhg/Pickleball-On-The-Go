@@ -1,6 +1,9 @@
 import { CONFIG } from '../shared/config.js';
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const radians = deg => deg * Math.PI / 180;
+const SEAT = { A: 1, B: -1 };
+const seatSign = (player) => SEAT[player] ?? 1;
+const opponentOf = (player) => (player === 'A' ? 'B' : 'A');
 
 export function speedFromPeak(peak, calibration = CONFIG.calibration) {
   const c = calibration;
@@ -13,15 +16,22 @@ export function speedFromPeak(peak, calibration = CONFIG.calibration) {
 
 export class Simulation {
   constructor(config = CONFIG) {
-    this.config = config; this.pose = null;
-    // Match state survives rally resets; reset() only clears the in-flight rally.
-    this.score = [0, 0]; this.servingTeam = 'A';
+    this.config = config;
+    this.pose = null;
+    this.players = { A: null, B: null };
+    this.score = [0, 0];
+    this.servingTeam = 'A';
     this.reset();
   }
   reset() {
     const p = this.config.player;
-    this.ball = { x: p.x, y: p.paddleHeight, z: p.feedZ, vx: 0, vy: 0, vz: 0 };
-    this.phase = 'idle'; this.bounces = 0; this.age = 0; this.resetIn = 0;
+    this.ball = { x: p.x, y: p.paddleHeight, z: p.feedDepth, vx: 0, vy: 0, vz: 0 };
+    this.phase = 'idle';
+    this.readyFor = null;
+    this.lastHitter = null;
+    this.bounces = 0;
+    this.age = 0;
+    this.resetIn = 0;
     this.events = [];
   }
   // Wall bot ("B"): one return of the first in-bounds far-side bounce, ~0.35 s later,
@@ -36,61 +46,105 @@ export class Simulation {
     this.events.push({ type: 'contact', player: 'B', time: this.age, ball: { ...this.ball } });
     return true;
   }
-  spawn() {
+  spawn(player = 'A') {
     if (this.phase !== 'idle') return false;
-    const p = this.paddle();
-    this.ball = { x: p.x, y: p.y, z: p.z - (this.config.player.z - this.config.player.feedZ), vx: 0, vy: 0, vz: 0 };
-    this.events = []; this.bounces = 0; this.age = 0; this.phase = 'ready';
+    const p = this.config.player;
+    const s = seatSign(player);
+    const paddle = this.paddle(player);
+    const setback = s * (p.homeDepth - p.feedDepth);
+    this.ball = { x: paddle.x, y: paddle.y, z: paddle.z - setback, vx: 0, vy: 0, vz: 0 };
+    this.events = [];
+    this.bounces = 0;
+    this.age = 0;
+    this.phase = 'ready';
+    this.readyFor = player;
+    this.lastHitter = null;
     return true;
   }
-  setPose(pose) {
+  setPose(pose, player = 'A') {
     const c = this.config;
-    this.pose = { ...pose,
-      court_x: clamp(pose.court_x, -c.court.width / 2 + c.tracking.edgeMargin, c.court.width / 2 - c.tracking.edgeMargin),
-      court_y: clamp(pose.court_y, c.tracking.minZ, c.tracking.maxZ),
+    const s = seatSign(player);
+    const halfWidth = c.court.width / 2 - c.tracking.edgeMargin;
+    const depth = clamp(Math.abs(pose.court_y), c.tracking.minDepth, c.tracking.maxDepth);
+    const normalized = {
+      ...pose,
+      player,
+      court_x: clamp(pose.court_x, -halfWidth, halfWidth),
+      court_y: s * depth,
       wrist_h: c.player.paddleHeight,
     };
-    if (this.phase === 'ready') {
-      this.ball.x = this.pose.court_x;
-      this.ball.z = this.pose.court_y - (c.player.z - c.player.feedZ);
+    this.pose = normalized;
+    this.players[player] = normalized;
+    if (this.phase === 'ready' && this.readyFor === player) {
+      const p = c.player;
+      this.ball.x = normalized.court_x;
+      this.ball.z = normalized.court_y - s * (p.homeDepth - p.feedDepth);
     }
   }
-  paddle() {
+  paddle(player = 'A') {
     const p = this.config.player;
-    return this.pose ? { x: this.pose.court_x, y: this.pose.wrist_h, z: this.pose.court_y }
-      : { x: p.x, y: p.paddleHeight, z: p.z };
+    const pose = this.players[player];
+    if (pose) return { x: pose.court_x, y: pose.wrist_h, z: pose.court_y };
+    return { x: p.x, y: p.paddleHeight, z: seatSign(player) * p.homeDepth };
   }
-  swing(swing) {
-    if (this.phase !== 'ready') return false;
-    const ball = this.ball, paddle = this.paddle(), c = this.config.physics;
+  swing(msg, player = 'A') {
+    const canServe = this.phase === 'ready' && this.readyFor === player;
+    const canReturn = this.phase === 'rally' && this.lastHitter !== player;
+    if (!canServe && !canReturn) return false;
+
+    const ball = this.ball, paddle = this.paddle(player), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
-    const speed = speedFromPeak(swing.peak_g, this.config.calibration);
-    // Equivalent paddle-face tilts should behave the same after a ±180° wrap.
-    const facePitch = Math.asin(Math.sin(radians(swing.pitch))) * 180 / Math.PI;
+
+    const attack = -seatSign(player);
+    const right = seatSign(player);
+    const pose = this.players[player];
+
+    const speed = speedFromPeak(msg.peak_g, this.config.calibration);
+    const facePitch = Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = radians(clamp((this.pose?.torso_deg || 0) * c.torsoGain + swing.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const azimuth = radians(clamp((pose?.torso_deg || 0) * c.torsoGain + msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
-    const raw = { vx: Math.sin(azimuth) * horizontal, vy: Math.sin(elevation) * speed, vz: -Math.cos(azimuth) * horizontal };
-    const targetX = Math.sign(swing.roll || 1) * c.targetX;
-    const flight = Math.max(c.minimumTargetFlightSeconds, Math.hypot(targetX - ball.x, c.targetZ - ball.z) / horizontal);
-    const aimed = { vx: (targetX - ball.x) / flight, vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2, vz: (c.targetZ - ball.z) / flight };
+
+    const raw = {
+      vx: right * Math.sin(azimuth) * horizontal,
+      vy: Math.sin(elevation) * speed,
+      vz: attack * Math.cos(azimuth) * horizontal,
+    };
+    const targetX = right * Math.sign(msg.roll || 1) * c.targetX;
+    const targetZ = attack * Math.abs(c.targetZ);
+    const flight = Math.max(c.minimumTargetFlightSeconds, Math.hypot(targetX - ball.x, targetZ - ball.z) / horizontal);
+    const aimed = {
+      vx: (targetX - ball.x) / flight,
+      vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2,
+      vz: (targetZ - ball.z) / flight,
+    };
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] = raw[axis] * (1 - c.aimAssist) + aimed[axis] * c.aimAssist;
     const magnitude = Math.hypot(ball.vx, ball.vy, ball.vz);
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;
     ball.vy = Math.min(ball.vy, c.maxUpwardSpeed);
-    this.phase = 'rally'; this.bounces = 0; this.age = 0;
-    this.events.push({ type: 'contact', player: 'A', time: this.age, ball: { ...ball }, swing: { ...swing } });
+
+    this.phase = 'rally';
+    this.readyFor = null;
+    this.lastHitter = player;
+    this.bounces = 0;
+    this.age = 0;
+    this.events.push({ type: 'contact', player, time: this.age, ball: { ...ball }, swing: { ...msg } });
     return true;
   }
   finish(reason) {
-    this.phase = 'reset'; this.resetIn = this.config.simulation.resetDelaySeconds;
+    this.phase = 'reset';
+    this.resetIn = this.config.simulation.resetDelaySeconds;
     this.events.push({ type: 'rally_end', reason, time: this.age });
   }
   step(dt = 1 / this.config.simulation.hz) {
     if (this.phase === 'ready' || this.phase === 'idle') return;
-    if (this.phase === 'reset') { this.resetIn -= dt; if (this.resetIn <= 0) this.phase = 'idle'; return; }
+    if (this.phase === 'reset') {
+      this.resetIn -= dt;
+      if (this.resetIn <= 0) this.phase = 'idle';
+      return;
+    }
     const b = this.ball, c = this.config.physics, court = this.config.court;
     const oldZ = b.z, oldY = b.y;
     this.age += dt;
@@ -117,10 +171,21 @@ export class Simulation {
     }
     if (this.phase === 'rally' && this.age >= this.config.simulation.maxFlightSeconds) this.finish('timeout');
   }
-  state(t = Date.now()) {
-    // Singles serving state is tracked as A/B internally and exposed through the
-    // existing 1/2 server numbers so the fixed wire schema never changes.
+  state(player = 'A', t = Date.now()) {
     const server = this.servingTeam === 'A' ? 1 : 2;
-    return { t, type: 'state', ball: { ...this.ball }, score: [...this.score], server, phase: this.phase };
+    const players = Object.fromEntries(Object.entries(this.players).map(([key, value]) => [key, value ? { ...value } : null]));
+    return {
+      t,
+      type: 'state',
+      player,
+      players,
+      ball: { ...this.ball },
+      score: [...this.score],
+      server,
+      phase: this.phase,
+      ready_for: this.readyFor,
+      last_hitter: this.lastHitter,
+    };
   }
 }
+export { opponentOf };

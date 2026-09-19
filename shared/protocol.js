@@ -8,6 +8,8 @@ const fields = {
   ruling: ['type', 'fault', 'player', 'rule', 'explanation', 'score', 'side_out'],
   classification: ['t', 'type', 'shot', 'target_zone', 'confidence', 'path'],
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
+  spawn: ['t', 'type'],
+  hello: ['type', 'player', 'role'],
 };
 const SHOTS = new Set(['dink', 'drive', 'drop', 'lob', 'smash', 'serve', 'mishit']);
 const ZONES = new Set(['near_left', 'near_right', 'deep_left', 'deep_right', 'kitchen']);
@@ -16,18 +18,42 @@ const exactKeys = (obj, keys) => obj && typeof obj === 'object' && !Array.isArra
 const finite = n => typeof n === 'number' && Number.isFinite(n);
 const score = value => Array.isArray(value) && value.length === 2 && value.every(n => Number.isInteger(n) && n >= 0);
 export function validMessage(msg) {
-  if (!exactKeys(msg, fields[msg?.type] || [])) return false;
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return false;
+  const required = fields[msg?.type] || [];
+  if (!required.length) return false;
+  if (!required.every(key => Object.hasOwn(msg, key))) return false;
+  const allowed = {
+    swing: [],
+    pose: ['player'],
+    state: ['player', 'players', 'ready_for', 'last_hitter'],
+    ruling: [],
+    classification: [],
+    ruling_evidence: [],
+    spawn: [],
+    hello: [],
+  };
+  const extras = Object.keys(msg).filter(key => !required.includes(key));
+  if (extras.some(key => !(allowed[msg.type] || []).includes(key))) return false;
   switch (msg.type) {
     case 'swing': return ['t', 'peak_g', 'pitch', 'roll', 'yaw_rate', 'duration_ms'].every(k => finite(msg[k]))
       && msg.t >= 0 && msg.peak_g >= 0 && msg.peak_g <= 100
       && Math.abs(msg.pitch) <= 180 && Math.abs(msg.roll) <= 180
       && Math.abs(msg.yaw_rate) <= 10000 && msg.duration_ms > 0 && msg.duration_ms <= 5000;
     case 'pose': return ['t', 'court_x', 'court_y', 'torso_deg', 'wrist_h'].every(k => finite(msg[k]))
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player))
       && msg.t >= 0 && Math.abs(msg.court_x) <= 20 && Math.abs(msg.court_y) <= 30
       && Math.abs(msg.torso_deg) <= 360 && msg.wrist_h >= 0 && msg.wrist_h <= 4;
     case 'state': return finite(msg.t) && exactKeys(msg.ball, ['x', 'y', 'z', 'vx', 'vy', 'vz'])
       && Object.values(msg.ball).every(finite) && score(msg.score)
-      && [1, 2].includes(msg.server) && typeof msg.phase === 'string';
+      && [1, 2].includes(msg.server) && typeof msg.phase === 'string'
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player))
+      && [undefined, null, 'A', 'B'].includes(msg.ready_for)
+      && [undefined, null, 'A', 'B'].includes(msg.last_hitter)
+      && (!msg.players || (typeof msg.players === 'object' && !Array.isArray(msg.players) && Object.entries(msg.players).every(([key, value]) => {
+        if (!['A', 'B'].includes(key)) return false;
+        if (value === null) return true;
+        return value && typeof value === 'object' && ['court_x', 'court_y', 'torso_deg', 'wrist_h'].every(k => finite(value[k]));
+      })));
     case 'ruling': return typeof msg.fault === 'boolean' && [null, 'A', 'B'].includes(msg.player)
       && typeof msg.rule === 'string' && typeof msg.explanation === 'string'
       && score(msg.score) && typeof msg.side_out === 'boolean';
@@ -42,6 +68,8 @@ export function validMessage(msg) {
       && (msg.preceding_shot === null || (msg.preceding_shot
         && SHOTS.has(msg.preceding_shot.shot) && ZONES.has(msg.preceding_shot.target_zone)
         && finite(msg.preceding_shot.confidence)));
+    case 'spawn': return finite(msg.t) && msg.t >= 0;
+    case 'hello': return ['A', 'B'].includes(msg.player) && typeof msg.role === 'string';
     default: return false;
   }
 }

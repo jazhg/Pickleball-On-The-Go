@@ -31,7 +31,8 @@ export const CONFIG = Object.freeze({
     targetX: 1.2, targetZ: -3.8, // x 0–2, z -2.5 to -5.5: far-side target.
     minimumTargetFlightSeconds: 0.4, // 0.3–0.7: stability for short contacts.
   },
-  player: { x: 0, z: 5.25, paddleHeight: 0.95, feedZ: 4.8 },
+  player: { x: 0, homeDepth: 5.25, feedDepth: 4.8, paddleHeight: 0.95 },
+  seats: { A: { sign: 1 }, B: { sign: -1 } },
   calibration: {
     softG: 2.5, mediumG: 4, hardG: 8, // 2–3 / 3–5 / 6–10: practice swings.
     softSpeed: 6.5, mediumSpeed: 8.5, hardSpeed: 11, // 5–7 / 7–9 / 10–13 m/s.
@@ -65,7 +66,7 @@ export const CONFIG = Object.freeze({
     shoulderMeters: 0.42, // 0.35–0.55: approximate physical shoulder width.
     referenceDistance: 2.5, // 1.5–4 m: assumed distance at calibration; depth is a proxy.
     positionAlpha: 0.2, // 0.1–0.35: smooth camera position estimates.
-    minZ: 2.6, maxZ: 6.1, // Stay on your side of the court.
+    minDepth: 2.6, maxDepth: 6.1, // Stay on your side of the court.
     edgeMargin: 0.35, // 0.2–0.6 m: avoid placing the player on the sideline.
     markerRadius: 0.35, // 0.2–0.5 m: ground-position circle size.
   },

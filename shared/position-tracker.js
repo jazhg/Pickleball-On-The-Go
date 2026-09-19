@@ -7,7 +7,7 @@ export class PositionTracker {
   constructor(config = CONFIG) { this.config = config; this.recenter(); }
   recenter() {
     this.samples = []; this.reference = null;
-    this.position = { x: this.config.player.x, z: this.config.player.z };
+    this.position = { x: this.config.player.x, z: this.config.player.homeDepth };
   }
   update(landmarks, t = Date.now()) {
     const c = this.config.tracking;
@@ -28,7 +28,10 @@ export class PositionTracker {
       };
     }
     const x = clamp((this.reference.hip - hip) / width * c.shoulderMeters, -this.config.court.width / 2 + c.edgeMargin, this.config.court.width / 2 - c.edgeMargin);
-    const z = clamp(this.config.player.z + c.referenceDistance * (this.reference.width / width - 1), c.minZ, c.maxZ);
+    const z = clamp(
+      this.config.player.homeDepth + c.referenceDistance * (this.reference.width / width - 1),
+      c.minDepth, c.maxDepth,
+    );
     this.position.x += c.positionAlpha * (x - this.position.x);
     this.position.z += c.positionAlpha * (z - this.position.z);
     // Keep contact height stable: camera is for body position, phone for swing dynamics.

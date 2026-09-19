@@ -79,6 +79,10 @@ function receiveRulingEvidence(message) {
 
 let socket;
 let latestState = null;
+let localPlayer = null;
+let seatSign = 1;
+let resolveHello;
+const helloReady = new Promise((resolve) => { resolveHello = resolve; });
 let court = null;
 let reconnectTimer = null;
 let reconnectAttempt = 0;
@@ -88,24 +92,34 @@ let launches = 0;
 let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
-let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.z };
+let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.homeDepth };
 const spawnButton = document.getElementById('spawn-button');
-spawnButton.addEventListener('click', async () => {
+spawnButton.addEventListener('click', () => {
   spawnButton.disabled = true;
-  try {
-    const response = await fetch('/api/spawn', { method: 'POST' });
-    if (!response.ok) throw new Error('Wait until this shot finishes before spawning the next ball.');
-  } catch (error) { ui['swing-hint'].textContent = error.message; }
-  finally { updateControls(); }
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+  }
+  updateControls();
 });
 
 function receivePose(pose) {
-  playerPosition = { x: pose.court_x, z: pose.court_y };
-  document.getElementById('player-dot').setAttribute('cx', 50 + pose.court_x / CONFIG.court.width * 94);
-  document.getElementById('player-dot').setAttribute('cy', 110 + pose.court_y / CONFIG.court.length * 214);
+  if (pose.player === localPlayer) return;
+  court?.updateOpponent(pose);
+}
+function updateMinimap(pose) {
+  const dot = document.getElementById('player-dot');
+  dot.setAttribute('cx', 50 + seatSign * pose.court_x / CONFIG.court.width * 94);
+  dot.setAttribute('cy', 110 + seatSign * pose.court_y / CONFIG.court.length * 214);
 }
 setupTracking({ onPose(pose) {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(pose));
+  const signed = {
+    ...pose,
+    court_x: seatSign * pose.court_x,
+    court_y: seatSign * Math.abs(pose.court_y),
+  };
+  playerPosition = { x: signed.court_x, z: signed.court_y };
+  updateMinimap(signed);
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(signed));
 } });
 
 function setConnection(text, kind = '') {
@@ -116,7 +130,10 @@ function setConnection(text, kind = '') {
 function updateControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
   const phase = latestState?.phase;
-  const canSwing = connected && rendererReady && phase === 'ready';
+  const canSwing = connected && rendererReady && localPlayer && (
+    (phase === 'ready' && latestState?.ready_for === localPlayer) ||
+    (phase === 'rally' && latestState?.last_hitter && latestState.last_hitter !== localPlayer)
+  );
   ui['swing-button'].disabled = !canSwing;
   spawnButton.disabled = !(connected && rendererReady && phase === 'idle');
   ui['phase-dot'].className = `phase-dot ${connected ? phase || '' : ''}`;
@@ -166,6 +183,10 @@ function isState(message) {
 
 function receiveState(state) {
   const previousPhase = latestState?.phase;
+  if (state.players && court && typeof court.updateOpponent === 'function') {
+    const opponentKey = localPlayer ? Object.keys(state.players).find((key) => key !== localPlayer) : Object.keys(state.players)[0];
+    if (opponentKey) court.updateOpponent(state.players[opponentKey]);
+  }
   if (state.phase === 'rally' && previousPhase === 'ready') {
     launches += 1;
     ui['last-shot'].textContent = 'Classifying…';
@@ -218,6 +239,8 @@ function connect() {
   const url = new URL('/ws', window.location.href);
   url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('role', 'laptop');
+  const seat = new URLSearchParams(window.location.search).get('seat');
+  if (seat === 'A' || seat === 'B') url.searchParams.set('seat', seat);
   socket = new WebSocket(url);
   socket.addEventListener('open', () => {
     reconnectAttempt = 0;
@@ -230,6 +253,23 @@ function connect() {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'hello' && ['A', 'B'].includes(message.player)) {
+      localPlayer = message.player;
+      seatSign = localPlayer === 'A' ? 1 : -1;
+      document.getElementById('seat-badge').textContent = `YOU ARE PLAYER ${localPlayer}`;
+      const phoneURL = new URL('/client-phone/', location.href);
+      phoneURL.searchParams.set('seat', localPlayer);
+      document.querySelectorAll('.phone-link').forEach((link) => {
+        link.href = phoneURL.href;
+        if (link.matches('#transport-note a')) link.textContent = phoneURL.href;
+      });
+      document.querySelectorAll('.player-label').forEach((label, index) => {
+        label.classList.toggle('is-local', localPlayer === (index === 0 ? 'A' : 'B'));
+      });
+      resolveHello();
+      updateControls();
+      return;
+    }
     if (isState(message)) receiveState(message);
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
@@ -276,11 +316,22 @@ window.addEventListener('pageshow', (event) => {
 
 const phoneURL = new URL('/client-phone/', location.href);
 const phoneLink = document.createElement('a');
+phoneLink.className = 'phone-link';
 phoneLink.href = phoneURL.href;
 phoneLink.textContent = phoneURL.href;
 phoneLink.target = '_blank';
 phoneLink.rel = 'noopener';
 const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const seatAURL = new URL('/client-laptop/', location.href);
+const seatBURL = new URL('/client-laptop/', location.href);
+seatAURL.searchParams.set('seat', 'A');
+seatBURL.searchParams.set('seat', 'B');
+const seatALink = document.getElementById('seat-a-link');
+const seatBLink = document.getElementById('seat-b-link');
+seatALink.href = seatAURL.href;
+seatALink.textContent = 'Player A laptop';
+seatBLink.href = seatBURL.href;
+seatBLink.textContent = 'Player B laptop';
 ui['transport-note'].append('Phone setup: ', phoneLink, document.createTextNode(isLocalhost
   ? ' · On your phone, replace localhost with this laptop’s LAN IP and use HTTPS. Install and fully trust the mkcert CA on iOS.'
   : location.protocol === 'https:'
@@ -303,8 +354,10 @@ function createCourt(THREE) {
   renderer.domElement.setAttribute('aria-label', 'First-person 3D view of the regulation pickleball court and authoritative ball');
   renderer.domElement.setAttribute('role', 'img');
 
+  const attack = -seatSign;
+  playerPosition = { x: CONFIG.player.x, z: seatSign * CONFIG.player.homeDepth };
   const camera = new THREE.PerspectiveCamera(90, 1, 0.05, 100);
-  const cameraTarget = new THREE.Vector3(CONFIG.player.x, CONFIG.render.eyeHeight, CONFIG.player.z);
+  const cameraTarget = new THREE.Vector3(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
   camera.position.copy(cameraTarget);
   scene.add(new THREE.HemisphereLight('#f8fff0', '#526d4e', 2.3));
   const sun = new THREE.DirectionalLight('#fff1cd', 3);
@@ -405,6 +458,19 @@ function createCourt(THREE) {
   playerRing.rotation.x = -Math.PI / 2;
   scene.add(playerRing);
 
+  const opponentGroup = new THREE.Group();
+  const opponentBody = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.9, 20), new THREE.MeshStandardMaterial({ color: '#d5e3ff', roughness: 0.7 }));
+  opponentBody.position.y = 0.45;
+  opponentGroup.add(opponentBody);
+  const opponentHead = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 18), new THREE.MeshStandardMaterial({ color: '#f8d09b', roughness: 0.9 }));
+  opponentHead.position.y = 1.0;
+  opponentGroup.add(opponentHead);
+  const opponentPaddle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 0.55), new THREE.MeshStandardMaterial({ color: '#f0d36a', roughness: 0.65 }));
+  opponentPaddle.position.set(0, 0.85, 0.38);
+  opponentGroup.add(opponentPaddle);
+  opponentGroup.visible = false;
+  scene.add(opponentGroup);
+
   const trailLength = Math.max(2, Math.floor(CONFIG.render.trailLength));
   const trailPositions = new Float32Array(trailLength * 3);
   const trailColors = new Float32Array(trailLength * 3);
@@ -442,6 +508,17 @@ function createCourt(THREE) {
       trailGeometry.setDrawRange(0, samples.length);
     }
   }
+  function updateOpponent(pose) {
+    if (!pose || !Number.isFinite(pose.court_x) || !Number.isFinite(pose.court_y)) {
+      opponentGroup.visible = false;
+      return;
+    }
+    opponentGroup.visible = true;
+    opponentGroup.position.set(pose.court_x, 0, pose.court_y);
+    opponentGroup.rotation.y = seatSign > 0 ? 0 : Math.PI;
+    opponentPaddle.rotation.x = -0.6 + ((pose.torso_deg || 0) / 180) * 0.7;
+    opponentPaddle.rotation.z = ((pose.torso_deg || 0) / 140) * 0.6;
+  }
 
   const resizeObserver = new ResizeObserver(() => {
     const { width: canvasWidth, height: canvasHeight } = container.getBoundingClientRect();
@@ -455,7 +532,7 @@ function createCourt(THREE) {
     cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
-    camera.lookAt(camera.position.x * 0.3, 0.2, 0.3);
+    camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
@@ -464,7 +541,7 @@ function createCourt(THREE) {
     showRenderError('The 3D graphics context was interrupted. Reload this page to reconnect the court.');
     updateControls();
   });
-  return { applyState, clearTrail };
+  return { applyState, clearTrail, updateOpponent };
 }
 
 function showRenderError(message) {
@@ -480,7 +557,7 @@ const slowLoadTimer = setTimeout(() => {
   ui['render-status'].querySelector('span:last-child').textContent = 'Still loading Three.js from the CDN. An internet connection is needed on the first load.';
 }, 8000);
 try {
-  const THREE = await import(THREE_URL);
+  const [THREE] = await Promise.all([import(THREE_URL), helloReady]);
   clearTimeout(slowLoadTimer);
   court = createCourt(THREE);
   rendererReady = true;
