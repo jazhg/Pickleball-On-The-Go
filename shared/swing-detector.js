@@ -35,6 +35,8 @@ export class SwingDetector {
     this.roll = 0;
     this.magnitudeG = 0;
     this.isStatic = false;
+    this.staticSince = null;
+    this.referenceCaptured = false;
     this.reset();
   }
 
@@ -53,6 +55,7 @@ export class SwingDetector {
     if (reference && Number.isFinite(reference.pitch) && Number.isFinite(reference.roll)
       && Math.abs(reference.pitch) <= 180 && Math.abs(reference.roll) <= 180) {
       this.reference = { ...reference };
+      this.referenceCaptured = true;
       return true;
     }
     return false;
@@ -61,6 +64,7 @@ export class SwingDetector {
   captureGravityReference() {
     if (!this.gravity || !this.isStatic || this.state !== 'IDLE') return null;
     this.reference = angleFromGravity(this.gravity);
+    this.referenceCaptured = true;
     this.pitch = 0;
     this.roll = 0;
     return { ...this.reference };
@@ -89,12 +93,15 @@ export class SwingDetector {
       && Math.hypot(gyro.alpha, gyro.beta, gyro.gamma) <= swing.staticMaxRate;
 
     if (this.state === 'IDLE' && this.isStatic) {
+      if (this.staticSince === null) this.staticSince = t;
       if (!this.gravity) this.gravity = { ...acceleration };
       else for (const axis of axes) this.gravity[axis] += swing.gravityAlpha * (acceleration[axis] - this.gravity[axis]);
+      if (!this.referenceCaptured && t - this.staticSince >= swing.gravityCaptureMs) this.captureGravityReference();
       const orientation = angleFromGravity(this.gravity);
       this.pitch = wrapDegrees(orientation.pitch - this.reference.pitch);
       this.roll = wrapDegrees(orientation.roll - this.reference.roll);
     } else if (this.gravity) {
+      if (!this.isStatic) this.staticSince = null;
       // DeviceMotion beta/gamma are x/y-axis angular rates, in degrees/second.
       // Gravity stays frozen through a swing so it cannot absorb linear motion.
       this.pitch = wrapDegrees(this.pitch + gyro.beta * dt);

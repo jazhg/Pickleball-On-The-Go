@@ -33,6 +33,7 @@ export const CONFIG = Object.freeze({
   calibration: {
     softG: 1.5, mediumG: 3, hardG: 6, // 1.3–2.5 / 2–4 / 4–8: practice swings.
     softSpeed: 4, mediumSpeed: 8.5, hardSpeed: 15, // 3–6 / 6–11 / 12–15.65 m/s.
+    minGapG: 0.15, // 0.05–0.5: require distinct increasing practice peaks.
   },
   swing: {
     startG: 1.5, endG: 1.2, // 1.3–2 / 1.05–1.35: BACKSWING and FOLLOW thresholds.
@@ -44,6 +45,7 @@ export const CONFIG = Object.freeze({
     staticToleranceG: 0.14, // 0.08–0.25: near-1g updates gravity estimate.
     staticMaxRate: 12, // 5–25 deg/s: also require little rotation to be still.
     gravityAlpha: 0.15, // 0.05–0.3: low-pass gravity/paddle orientation at rest.
+    gravityCaptureMs: 700, // 400–1500: uninterrupted still samples for a flat reference.
     maxGyroStepSeconds: 0.05, // 0.02–0.1: cap integration after dropped samples.
     sensorTimeoutMs: 4000, // 2000–8000: report granted permission but no events.
     synthetic: { peak_g: 3.8, pitch: 14.2, roll: -6.1, yaw_rate: 220, duration_ms: 310 },

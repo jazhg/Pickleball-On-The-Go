@@ -1,6 +1,6 @@
 # Nemotron evaluation results
 
-Generated: 2026-09-19T17:23:36.864384+00:00
+Generated: 2026-09-19T17:42:26.957587+00:00
 
 Mode: OFFLINE — no model requests. Fixtures evaluated: 50. Independently reviewed: 0.
 
@@ -35,7 +35,7 @@ Dataset: synthetic smoke examples, NOT human captures; n=50. Required 100 prompt
 | Method | n | Accuracy | p50 ms | p95 ms | Fallback |
 | --- | --- | --- | --- | --- | --- |
 | Heuristic | 50 | 43/50 (86.0%) | 0.002 | 0.003 | n/a |
-| Nano offline fallback | 50 | 43/50 (86.0%) | 0.105 | 0.132 | 50/50 (100.0%) |
+| Nano offline fallback | 50 | 43/50 (86.0%) | 0.121 | 0.182 | 50/50 (100.0%) |
 
 ### Heuristic: confusion matrix (rows=prompted label; columns=prediction)
 
@@ -139,4 +139,4 @@ Dataset: synthetic smoke examples, NOT human captures; n=50. Required 100 prompt
 - Offline fallback preserves scores by design. Live model metrics need NVIDIA_API_KEY and completed rules.json; model rows remain unmeasured until actual calls are made.
 - Capture 100 prompted, consented human swings; use --swings to evaluate their labels. No human capture was simulated or claimed.
 - The deadline includes classifier request, parsing, and validation; late responses are discarded and logged. Latency scheduling has normal operating-system jitter.
-- Raw responses and per-call path records: `/Users/jzheng/Desktop/Pickleball-On-The-Go/nemotron/logs/20260919T172336_599224Z`. API credentials and request authorization headers are never logged.
+- Raw responses and per-call path records: `/Users/jzheng/Desktop/Pickleball-On-The-Go/nemotron/logs/20260919T174226_906307Z`. API credentials and request authorization headers are never logged.

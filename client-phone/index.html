@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#142c29" />
+    <title>Pickleball On The Go — Phone Paddle</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="phone-shell">
+      <header class="topbar">
+        <a class="brand" href="/client-laptop/" aria-label="Back to court">● PICKLEBALL <span>ON THE GO</span></a>
+        <span class="tag">PHONE PADDLE · M1</span>
+      </header>
+
+      <section class="intro">
+        <p class="eyebrow">THE PHONE IS THE PADDLE</p>
+        <h1>Connect, hold it flat, then swing.</h1>
+        <p class="lede">Keep this page open on the phone. It reads motion only after you tap the permission button, then sends the same swing event to the laptop’s relay.</p>
+      </section>
+
+      <section class="connection-card card" aria-label="Connection status">
+        <div class="card-heading"><span class="step">01</span><div><p class="eyebrow">RELAY</p><h2 id="connection-title">Connecting to the laptop</h2></div><span id="connection-dot" class="status-dot"></span></div>
+        <p id="connection-detail">Open this page from the laptop’s HTTPS LAN address. The page will reconnect if Wi-Fi briefly drops.</p>
+        <div id="address-hint" class="address-hint"></div>
+      </section>
+
+      <section class="motion-card card" aria-label="Motion permission">
+        <div class="card-heading"><span class="step">02</span><div><p class="eyebrow">MOTION SENSOR</p><h2>Enable motion</h2></div><span id="secure-badge" class="small-badge">CHECKING</span></div>
+        <p id="permission-detail">On iPhone, tap this button from Safari. iOS only allows motion permission from a user tap.</p>
+        <button id="enable-button" class="primary-button" type="button">Enable motion access <span aria-hidden="true">→</span></button>
+        <p id="permission-error" class="error-text" role="alert" hidden></p>
+      </section>
+
+      <section class="readings-card card" aria-label="Live sensor readings">
+        <div class="card-heading"><div><p class="eyebrow">LIVE READOUT</p><h2>Sensor feed</h2></div><span id="sensor-age" class="small-badge">NO DATA</span></div>
+        <div class="readings-grid">
+          <div class="reading"><span>STATE</span><strong id="reading-state">IDLE</strong></div>
+          <div class="reading"><span>PEAK G</span><strong id="reading-peak">—</strong></div>
+          <div class="reading"><span>PITCH</span><strong id="reading-pitch">—</strong><em>degrees</em></div>
+          <div class="reading"><span>ROLL</span><strong id="reading-roll">—</strong><em>degrees</em></div>
+          <div class="reading"><span>YAW RATE</span><strong id="reading-yaw">—</strong><em>deg/s</em></div>
+          <div class="reading"><span>GRAVITY</span><strong id="reading-gravity">—</strong></div>
+        </div>
+        <p id="sensor-detail" class="sensor-detail">Waiting for DeviceMotionEvent samples.</p>
+      </section>
+
+      <section class="calibration-card card" aria-label="Swing calibration">
+        <div class="card-heading"><span class="step">03</span><div><p class="eyebrow">OPTIONAL SETUP</p><h2>Calibrate your swing</h2></div><span id="calibration-badge" class="small-badge">DEFAULT</span></div>
+        <p id="calibration-detail">Three swings—soft, medium, hard—make the speed mapping personal. You can skip this for a quick keyboard-style test.</p>
+        <div class="practice-row"><span id="practice-soft" class="practice-pill">SOFT <b>—</b></span><span id="practice-medium" class="practice-pill">MEDIUM <b>—</b></span><span id="practice-hard" class="practice-pill">HARD <b>—</b></span></div>
+        <div class="button-row"><button id="calibrate-button" class="secondary-button" type="button">Start three-swing setup</button><button id="skip-button" class="text-button" type="button">Use defaults</button></div>
+      </section>
+
+      <section class="test-card card" aria-label="Synthetic swing test">
+        <div class="card-heading"><div><p class="eyebrow">NO HARDWARE CHECK</p><h2>Test the connection</h2></div><span id="send-badge" class="small-badge">WAITING</span></div>
+        <p id="send-detail">Send one synthetic swing to prove the phone-to-server path. The laptop should launch the ball.</p>
+        <button id="synthetic-button" class="primary-button" type="button" disabled>Send test swing <span aria-hidden="true">→</span></button>
+      </section>
+
+      <section class="help-card" aria-label="Phone setup help">
+        <p class="eyebrow">IF IT DOES NOT CONNECT</p>
+        <p>Both devices must be on the same Wi-Fi. Use <strong>https://</strong> and the laptop’s LAN IP, never <code>localhost</code> on the phone. If Safari says the connection is not private, install the public mkcert CA on the phone and enable full trust in Settings → General → About → Certificate Trust Settings.</p>
+        <p>Start the relay from the project folder with <code>npm start</code>. The terminal prints the exact phone URL.</p>
+      </section>
+
+      <footer><a href="/client-laptop/">← Back to the court</a><span>same LAN · section 3 swing schema</span></footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
