@@ -33,9 +33,11 @@
     <button id="spawn-button" class="spawn-button" type="button" disabled>New ball</button>
   </header>
   <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="game-sidebar" aria-expanded="false" aria-label="Open game menu">☰ <span>Menu</span></button>
+  <audio id="background-music" preload="none"></audio>
   <dialog id="game-sidebar" class="session-panel" aria-labelledby="menu-title">
     <div class="sidebar-heading"><div><span class="eyebrow">PICKLEBALL ON THE GO</span><h1 id="menu-title">Match menu</h1></div><button id="menu-close" type="button" aria-label="Close game menu">✕</button></div>
     <div class="session-heading"><span id="match-status">CONNECTING</span><span>Server <b id="server-number">—</b></span></div>
+    <label class="music-setting">Background music <input id="music-toggle" type="checkbox" role="switch" checked /></label>
     <p id="phase-description">Connect your phone to get started.</p>
     <button id="swing-button" class="swing-button" type="button" disabled>Swing the paddle</button>
     <p id="swing-hint">Press space or swing your phone.</p>

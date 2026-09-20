@@ -67,7 +67,7 @@ export function describeEvents(fixtureEvents) {
 }
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg' };
 const lanAddresses = () => Object.values(networkInterfaces())
   .flatMap(addresses => addresses || [])
   .filter(address => address.family === 'IPv4' && !address.internal)
@@ -118,6 +118,21 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     if (!MIME[path.extname(file)] || !file.startsWith(ROOT)) { res.writeHead(404, headers); return res.end('Not found'); }
     try {
       const content = await fs.readFile(file);
+      if (path.extname(file) === '.mp3') {
+        const audioHeaders = { ...headers, 'Content-Type': MIME['.mp3'], 'Accept-Ranges': 'bytes' };
+        if (req.headers.range && req.method !== 'HEAD') {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+          const start = match?.[1] ? Number(match[1]) : Math.max(0, content.length - Number(match?.[2]));
+          const end = match?.[1] && match[2] ? Math.min(Number(match[2]), content.length - 1) : content.length - 1;
+          if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= content.length) {
+            res.writeHead(416, { ...audioHeaders, 'Content-Range': `bytes */${content.length}` }); return res.end();
+          }
+          res.writeHead(206, { ...audioHeaders, 'Content-Range': `bytes ${start}-${end}/${content.length}`, 'Content-Length': end - start + 1 });
+          return res.end(content.subarray(start, end + 1));
+        }
+        res.writeHead(200, { ...audioHeaders, 'Content-Length': content.length });
+        return res.end(req.method === 'HEAD' ? undefined : content);
+      }
       res.writeHead(200, { ...headers, 'Content-Type': MIME[path.extname(file)] });
       res.end(req.method === 'HEAD' ? undefined : content);
     } catch { res.writeHead(404, headers); res.end('Not found'); }
@@ -234,6 +249,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         lastShot = shot;
         sendToLaptops(shot);
         if (accepted) {
+          sendToLaptops({ type: 'racket_hit', t: Date.now() });
           // Physics launches immediately; classification runs async and must never
           // block the 120 Hz sim loop. The bridge always resolves (fallback included).
           const pose = sim.pose ? { wrist_h: sim.pose.wrist_h, phase: sim.phase } : {};
@@ -281,11 +297,21 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       provisional: response.provisional !== false, path: response.path || 'unknown',
       trigger_events: describeEvents(envelope.events), preceding_shot: shotAtRallyEnd });
   };
+  let lastBounceSoundAt = -Infinity;
   const tick = setInterval(() => {
     const now = performance.now();
     accumulator += Math.min((now - previous) / 1000, CONFIG.simulation.maxCatchupSeconds);
     previous = now;
-    while (accumulator >= step) { sim.step(step); accumulator -= step; }
+    while (accumulator >= step) {
+      const eventCount = sim.events.length;
+      sim.step(step); accumulator -= step;
+      for (const event of sim.events.slice(eventCount)) {
+        if (event.type === 'bounce' && event.impactSpeed >= 0.8 && now - lastBounceSoundAt >= 180) {
+          lastBounceSoundAt = now;
+          sendToLaptops({ type: 'ground_bounce', t: Date.now() });
+        }
+      }
+    }
     if (sim.phase !== prevPhase) {
       if (sim.phase === 'rally') botScheduled = false;
       if (prevPhase === 'rally' && sim.phase === 'reset') {
@@ -314,7 +340,10 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       const landed = sim.events.some((e, index) => index > contactIndex && e.type === 'bounce' && e.in_bounds && e.z < 0);
       if (landed) {
         botScheduled = true;
-        botTimer = setTimeout(() => { botTimer = null; if (!multiplayer) sim.botReturn(); }, 350);
+        botTimer = setTimeout(() => {
+          botTimer = null;
+          if (!multiplayer && sim.botReturn()) sendToLaptops({ type: 'racket_hit', t: Date.now() });
+        }, 350);
       }
     }
   }, 1000 / CONFIG.simulation.hz);

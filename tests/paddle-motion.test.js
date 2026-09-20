@@ -4,6 +4,17 @@ import { PaddleMotion, paddleCenter } from '../shared/paddle-motion.js';
 import { Simulation } from '../server/physics.js';
 import { CONFIG } from '../shared/config.js';
 import { validMessage } from '../shared/protocol.js';
+
+test('serve intent ignores small movement and spikes but accepts a sustained forward stroke', () => {
+  const identity = { x: 0, y: 0, z: 0, w: 1 };
+  const motion = new PaddleMotion();
+  for (let t = 0; t < 600; t += 20) assert.equal(motion.update(t, { x: 0, y: 0, z: 2 }, identity, {}, { serving: true }), null);
+  assert.equal(motion.update(600, { x: 0, y: 0, z: 12 }, identity, {}, { serving: true }), null);
+  for (let t = 620; t < 1000; t += 20) assert.equal(motion.update(t, { x: 0, y: 0, z: 0 }, identity, {}, { serving: true }), null);
+  let contact = null;
+  for (let t = 1000; t < 1260; t += 20) contact ||= motion.update(t, { x: 0, y: 0, z: 9 }, identity, {}, { serving: true });
+  assert.ok(contact, 'a deliberate forward serve must still work');
+});
 const q = { x: 0, y: 0, z: 0, w: 1 };
 
 test('backswing and forward acceleration become features and emit one contact intent', () => {
@@ -53,9 +64,14 @@ test('both seats keep authoritative contact seat-symmetric and independent of mo
       motion_x: 4, motion_y: 2, motion_z: -5, motion_magnitude: 6.7, angular_speed: 120 };
     sim.setController(pose, player); sim.spawn(player);
     const center = paddleCenter({ x: 0, z: (player === 'A' ? 1 : -1) * CONFIG.player.homeDepth }, player, pose, CONFIG);
-    for (const axis of ['x', 'y', 'z']) assert.equal(sim.ball[axis], center[axis]);
+    const waiting = { ...sim.ball };
+    assert.equal(waiting.x, CONFIG.player.x);
+    assert.ok((waiting.z - center.z) * (player === 'A' ? 1 : -1) < 0);
+    sim.setController({ ...pose, motion_x: -4 }, player);
+    sim.step();
+    assert.deepEqual(sim.ball, waiting);
     assert.equal(sim.swing({ t: 2, type: 'swing', ...CONFIG.swing.synthetic }, player, pose), true);
-    for (const axis of ['x', 'y', 'z']) assert.equal(sim.events.at(-1).ball[axis], center[axis]);
+    for (const axis of ['x', 'y', 'z']) assert.equal(sim.events.at(-1).ball[axis], waiting[axis]);
   }
 });
 

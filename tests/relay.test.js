@@ -6,6 +6,50 @@ import { createRelay } from '../server/index.js';
 import { CONFIG } from '../shared/config.js';
 import { validMessage } from '../shared/protocol.js';
 
+test('confirmed racket contacts sound on both laptops, missed swings stay silent', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;
+  const a = new WebSocket(`${endpoint}&seat=A`), b = new WebSocket(`${endpoint}&seat=B`);
+  try {
+    await Promise.all([once(a, 'open'), once(b, 'open')]);
+    let count = 0;
+    a.on('message', data => { if (JSON.parse(String(data)).type === 'racket_hit') count++; });
+    const heard = Promise.all([a, b].map(ws => waitForMessage(ws, msg => msg.type === 'racket_hit')));
+    relay.sim.spawn('A');
+    a.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
+    await heard;
+    const missed = waitForMessage(b, msg => msg.type === 'shot' && msg.accepted === false);
+    relay.sim.ball = { x: 0, y: 1, z: 100, vx: 0, vy: 0, vz: 0 };
+    b.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
+    await missed;
+    assert.equal(count, 1);
+  } finally { a.close(); b.close(); await relay.close(); }
+});
+
+test('a floor bounce sends one sound event to each laptop', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;
+  const a = new WebSocket(`${endpoint}&seat=A`), b = new WebSocket(`${endpoint}&seat=B`);
+  try {
+    await Promise.all([once(a, 'open'), once(b, 'open')]);
+    let count = 0;
+    a.on('message', data => { if (JSON.parse(String(data)).type === 'ground_bounce') count++; });
+    const heard = Promise.all([a, b].map(ws => waitForMessage(ws, msg => msg.type === 'ground_bounce')));
+    relay.sim.phase = 'rally';
+    relay.sim.lastHitter = 'B';
+    relay.sim.ball = { x: 0, y: CONFIG.physics.ballRadius + 0.001, z: 3, vx: 0, vy: -2, vz: 0 };
+    const messages = await heard;
+    assert.ok(messages.every(msg => Number.isFinite(msg.t)));
+    relay.sim.phase = 'ready';
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(count, 1, 'state broadcasts must not replay the impact');
+    relay.sim.phase = 'rally';
+    relay.sim.ball = { x: 0, y: CONFIG.physics.ballRadius, z: 3, vx: 0, vy: -0.05, vz: 0 };
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(count, 1, 'tiny settling bounces must remain silent');
+  } finally { a.close(); b.close(); await relay.close(); }
+});
+
 function waitForMessage(ws, predicate, timeoutMs = 2000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

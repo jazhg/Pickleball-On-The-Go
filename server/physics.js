@@ -57,7 +57,9 @@ export class Simulation {
   spawn(player = 'A') {
     if (this.phase !== 'idle') return false;
     const paddle = this.paddle(player);
-    this.ball = { x: paddle.x, y: paddle.y, z: paddle.z, vx: 0, vy: 0, vz: 0 };
+    const x = this.players[player]?.court_x ?? this.config.player.x;
+    // A stationary serve target in front of the player, clear of the paddle.
+    this.ball = { x, y: paddle.y + 0.18, z: paddle.z - seatSign(player) * 0.35, vx: 0, vy: 0, vz: 0 };
     this.events = [];
     this.bounces = 0;
     this.age = 0;
@@ -81,13 +83,9 @@ export class Simulation {
     };
     this.pose = normalized;
     this.players[player] = normalized;
-    if (this.phase === 'ready' && this.readyFor === player) {
-      Object.assign(this.ball, this.paddle(player));
-    }
   }
   setController(pose, player = 'A') {
     this.controllers[player] = pose;
-    if (this.phase === 'ready' && this.readyFor === player) Object.assign(this.ball, this.paddle(player));
   }
   paddle(player = 'A') {
     const pose = this.players[player], p = this.config.player;
@@ -102,7 +100,7 @@ export class Simulation {
     const ball = this.ball, paddle = this.paddle(player), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
 
-    Object.assign(ball, paddle);
+    if (!canServe) Object.assign(ball, paddle);
     const attack = -seatSign(player);
     const right = seatSign(player);
     const pose = this.players[player];
@@ -184,11 +182,12 @@ export class Simulation {
       }
     }
     if (b.y <= c.ballRadius && b.vy < 0) {
+      const impactSpeed = -b.vy;
       b.y = c.ballRadius; b.vy = -b.vy * c.restitution;
       b.vx *= c.surfaceRetention; b.vz *= c.surfaceRetention;
       this.bounces++;
       const inBounds = Math.abs(b.x) <= court.width / 2 + c.ballRadius && Math.abs(b.z) <= court.length / 2 + c.ballRadius;
-      this.events.push({ type: 'bounce', time: this.age, x: b.x, z: b.z, in_bounds: inBounds });
+      this.events.push({ type: 'bounce', time: this.age, x: b.x, z: b.z, in_bounds: inBounds, impactSpeed });
       // Keep practice rallies alive through repeated in-bounds bounces.
       if (!inBounds) this.finish('out');
     }

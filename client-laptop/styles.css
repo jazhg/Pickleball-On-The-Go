@@ -1,6 +1,8 @@
 :root { color-scheme:dark; font-family:'Avenir Next','Segoe UI',sans-serif; color:#eef3fa; background:#101a25; font-synthesis:none; --red:#ff8585; --blue:#83baff; --muted:#acb9c9; --border:#ffffff20; }
 * { box-sizing:border-box; }
 body { margin:0; overflow:hidden; }
+.music-setting { display:flex; align-items:center; justify-content:space-between; padding:16px 0; margin-top:12px; border-bottom:1px solid var(--border); font-size:13px; cursor:pointer; }
+.music-setting input { width:20px; height:20px; accent-color:#83baff; cursor:pointer; }
 button,a,kbd { font:inherit; }
 button,a { -webkit-tap-highlight-color:transparent; }
 button { cursor:pointer; color:inherit; }

@@ -29,7 +29,7 @@ export class PaddleMotion {
     this.magnitude = 0; this.angularSpeed = 0;
     this.lastT = null; this.activeSince = null; this.lastSwing = -Infinity; this.peak = 0;
   }
-  update(t, acceleration, q, rotationRate = {}) {
+  update(t, acceleration, q, rotationRate = {}, { serving = false } = {}) {
     if (!Number.isFinite(t) || !q || !axes.every(a => Number.isFinite(acceleration?.[a]))) return null;
     const elapsed = this.lastT === null ? 0 : (t - this.lastT) / 1000;
     if (elapsed < 0) return null;
@@ -52,13 +52,14 @@ export class PaddleMotion {
     this.angularSpeed = Math.min(c.maxAngularSpeed, Math.hypot(
       Number(rotationRate.alpha) || 0, Number(rotationRate.beta) || 0, Number(rotationRate.gamma) || 0,
     ));
-    if (this.magnitude > c.activeAcceleration) {
+    const activeAcceleration = serving ? 5 : c.activeAcceleration;
+    if (this.magnitude > activeAcceleration) {
       this.activeSince ??= t;
       this.peak = Math.max(this.peak, this.magnitude);
-    } else if (this.magnitude < c.releaseAcceleration) { this.activeSince = null; this.peak = 0; }
-    const striking = filtered.z < -this.config.arm.phoneForwardAcceleration
-      || (Math.hypot(filtered.x, filtered.y) > 1.1 && this.angularSpeed > 80);
-    if (striking && this.activeSince !== null && t - this.activeSince >= 60 && t - this.lastSwing >= 350) {
+    } else if (this.magnitude < (serving ? activeAcceleration : c.releaseAcceleration)) { this.activeSince = null; this.peak = 0; }
+    const striking = filtered.z < -(serving ? 3.5 : this.config.arm.phoneForwardAcceleration)
+      || (Math.hypot(filtered.x, filtered.y) > (serving ? 5 : 1.1) && this.angularSpeed > (serving ? 100 : 80));
+    if (striking && this.activeSince !== null && t - this.activeSince >= (serving ? 100 : 60) && t - this.lastSwing >= 350) {
       this.lastSwing = t;
       return { t, type: 'swing', peak_g: 2.5 + this.peak / CONFIG.physics.gravity,
         pitch: 0, roll: 0, yaw_rate: 0, duration_ms: Math.max(1, Math.min(1400, t - this.activeSince)) };

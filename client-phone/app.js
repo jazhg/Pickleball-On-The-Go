@@ -102,6 +102,11 @@ function connect() {
         $('your-score').textContent = msg.score[localPlayer === 'A' ? 0 : 1];
         $('their-score').textContent = msg.score[localPlayer === 'A' ? 1 : 0];
       }
+      if (msg.phase === 'ready' && ballPhase !== 'ready') {
+        // A new serve must begin with fresh motion, not the tail of a prior gesture.
+        paddleMotion.reset();
+        detector.reset();
+      }
       ballPhase = msg.phase;
       readyFor = msg.ready_for ?? null;
       lastHitter = msg.last_hitter ?? null;
@@ -240,11 +245,12 @@ function onMotion(event) {
     const q = relativeOrientation(latestOrientation, neutralOrientation);
     const linear = event.acceleration;
     if (linear && ['x', 'y', 'z'].every(axis => Number.isFinite(linear[axis]))) {
-      movementSwing = paddleMotion.update(now, linear, q, event.rotationRate || {});
+      movementSwing = paddleMotion.update(now, linear, q, event.rotationRate || {}, { serving: ballPhase === 'ready' });
     }
   }
-  if ((movementSwing || swing) && now - lastMotionSwingAt >= 350) {
-    if (sendSwing(movementSwing || swing, false)) lastMotionSwingAt = now;
+  const deliberateSwing = ballPhase === 'ready' && swing?.duration_ms < 100 ? null : swing;
+  if ((movementSwing || deliberateSwing) && now - lastMotionSwingAt >= 350) {
+    if (sendSwing(movementSwing || deliberateSwing, false)) lastMotionSwingAt = now;
   }
 }
 

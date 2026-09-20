@@ -1,6 +1,12 @@
 import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
+import { setupBackgroundMusic } from './background-music.js';
+import { setupImpactAudio } from './bounce-audio.js';
+
+setupBackgroundMusic();
+const playGroundBounce = setupImpactAudio('./audio/ground-bounce.mp3', { replacePrevious: true });
+const playRacketHit = setupImpactAudio('./audio/racket-hit.mp3');
 
 const teamName = player => player === 'A' ? 'Red' : player === 'B' ? 'Blue' : 'Team';
 const sidebar = document.getElementById('game-sidebar');
@@ -220,7 +226,7 @@ function updateControls() {
     ui['swing-hint'].textContent = 'Close the menu and click New ball, or use your phone.';
   } else if (phase === 'ready') {
     ui['phase-title'].textContent = canSwing ? 'Your serve' : `${teamName(latestState.ready_for)} serves`;
-    ui['phase-description'].textContent = canSwing ? 'The ball is at your paddle. Send it over the net.' : 'Get ready to return the ball.';
+    ui['phase-description'].textContent = canSwing ? 'The ball is waiting in front of you. Hit it to serve.' : 'Get ready to return the ball.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
   } else if (phase === 'rally') {
     ui['phase-title'].textContent = 'Ball in play';
@@ -340,6 +346,8 @@ function connect() {
       return;
     }
     if (isState(message)) receiveState(message);
+    else if (message.type === 'ground_bounce' && Number.isFinite(message.t)) playGroundBounce();
+    else if (message.type === 'racket_hit' && Number.isFinite(message.t)) playRacketHit();
     else if (message.type === 'controller_pose' && validMessage(message)) {
       controllerPose = message;
       court?.updateController(message);

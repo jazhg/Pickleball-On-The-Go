@@ -96,11 +96,14 @@ test('extreme phone angles and force cannot launch the ball above two meters', (
     for (let i = 0; i < 2400 && sim.phase === 'rally'; i++) { sim.step(); assert.ok(sim.ball.y < 2, `too high at pitch ${pitch}`); }
   }
 });
-test('ready ball follows the tracked player; airborne ball does not', () => {
+test('serve ball stays fixed when the player moves and needs a nearby hit', () => {
   const sim = new Simulation(); sim.spawn();
-  sim.setPose({ t: 1, type: 'pose', court_x: 1, court_y: 4.8, torso_deg: 0, wrist_h: 1 });
-  assert.equal(sim.ball.x, 1 + CONFIG.render.neutralPaddleOffset.x);
-  assert.equal(sim.ball.z, 4.8 + CONFIG.render.neutralPaddleOffset.z);
+  const waiting = { ...sim.ball };
+  sim.setPose({ t: 1, type: 'pose', court_x: 2, court_y: 4.8, torso_deg: 0, wrist_h: 1 });
+  assert.deepEqual(sim.ball, waiting);
+  assert.equal(sim.swing(swing), false);
+  assert.equal(sim.phase, 'ready');
+  sim.setPose({ ...sim.players.A, court_x: CONFIG.player.x, court_y: CONFIG.player.homeDepth });
   assert.equal(sim.swing(swing), true);
   const x = sim.ball.x;
   sim.setPose({ ...sim.players.A, court_x: -1 }, 'A');
