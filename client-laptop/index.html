@@ -41,9 +41,9 @@
           </section>
 
           <aside class="session-panel" aria-label="Session controls and score">
-            <div class="session-heading"><span class="eyebrow">YOUR SESSION</span><span id="seat-badge" class="edition">CONNECTING…</span><span class="session-id">01 / PRACTICE</span></div>
+            <div class="session-heading"><span class="eyebrow">YOUR MATCH</span><span id="seat-badge" class="edition">CONNECTING…</span><span id="match-status" class="session-id">CONNECTING</span></div>
             <div class="scoreboard" aria-label="Score"><div><span class="player-label">PLAYER A <i id="serve-a" class="serve-dot" title="Serving"></i></span><strong id="score-a">00</strong></div><span class="score-divider">:</span><div><span class="player-label">PLAYER B <i id="serve-b" class="serve-dot" title="Serving" hidden></i></span><strong id="score-b">00</strong></div></div>
-            <div class="score-meta"><span>Server <b id="server-number">—</b></span><span>Single-direction loop</span></div>
+            <div class="score-meta"><span>Server <b id="server-number">—</b></span><span>Shared live court</span></div>
 
             <div class="phase-card"><div class="phase-indicator"><span id="phase-dot" class="phase-dot"></span><strong id="phase-title">Connecting to court</strong></div><p id="phase-description">The relay server will place a ball at your paddle.</p></div>
 
@@ -74,10 +74,16 @@
           <a id="seat-a-link" href="#">Player A laptop</a>
           <a id="seat-b-link" href="#">Player B laptop</a>
         </div>
+        <section class="multiplayer-setup" aria-label="Connect a second player">
+          <h3>Play with a friend</h3>
+          <p>Open this link on the other MacBook, on the same Wi-Fi. Each player opens the phone link shown on their own MacBook, enables motion, and recenters. Run the server on just one MacBook.</p>
+          <a id="opponent-link" href="/client-laptop/?seat=B">Second player link</a>
+          <p id="pairing-status" role="status">Waiting for device connections…</p>
+        </section>
         <section class="getting-started" aria-label="Ways to play">
           <div class="start-title"><span class="eyebrow">PICK YOUR PADDLE</span><h2>You’re one swing away.</h2></div>
           <div class="input-option"><span class="step-number">01</span><div><h3>Try it with your keyboard</h3><p>Click Spawn ball, then press <kbd>space</kbd> to launch.<br />Request each new ball when you’re ready.</p></div></div>
-          <div class="input-option"><span class="step-number">02</span><div><h3>Bring your phone into play <a class="phone-link" href="/client-phone/" target="_blank" rel="noopener" aria-label="Open phone setup">↗</a></h3><p id="phone-help">Open the phone page on the same Wi-Fi.<br />Trust your local certificate, then enable motion.</p></div></div>
+          <div class="input-option"><span class="step-number">02</span><div><h3>Bring your phone into play <a class="phone-link" href="/client-phone/" target="_blank" rel="noopener" aria-label="Open phone setup">↗</a></h3><p id="phone-help">Each player opens their own phone link.<br />Player A and Player B share the same live ball.</p></div></div>
         </section>
         <p id="transport-note" class="transport-note"></p>
       </main>

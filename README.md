@@ -102,3 +102,22 @@ Phone motion needs a 2.5g start and a 600ms quiet recovery. Pitch has less influ
 On the laptop, click **Enable camera**, allow access, and stand still with shoulders and hips visible for calibration. A circle in the court map shows your estimated location, a ground ring marks your feet, and the view follows the server's position estimate. **Recenter position** resets the calibration. If tracking is lost or disabled, the last position is held. Video is processed locally; only pose coordinates go to the relay. The phone still measures swings.
 
 Position uses hip midpoint and shoulder size; depth is approximate and turning your body can affect it. This is not room-scale position measurement. The tracker uses the MediaPipe library already named in the design and its lite pose model, following the [official Web guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js). The first camera start needs internet to load the CDN library/model.
+
+## Live two-player setup
+
+Run `npm start` on **one** MacBook. Both MacBooks and both phones must use that
+server's HTTPS LAN address on the same Wi-Fi; do not start separate servers.
+
+1. Open `/client-laptop/?seat=A` on the first MacBook.
+2. Under **Play with a friend**, open the displayed link on the second MacBook.
+   It assigns the opposite seat and its own first-person court view.
+3. Each player opens the phone link displayed on **their own** MacBook. Its
+   `seat=A` or `seat=B` pairs the phone with that player.
+4. On both phones, enable motion and recenter with the screen facing that
+   player's MacBook. Enable camera tracking on each MacBook to move around.
+5. Check the device connection indicators, then spawn a ball and rally.
+
+The host's local HTTPS certificate must be trusted on the joining devices.
+Player B joining disables the practice bot for that server session, including
+across temporary disconnects. Restarting the server starts a new session.
+This setup supports a shared LAN; internet matchmaking/hosting is not included.

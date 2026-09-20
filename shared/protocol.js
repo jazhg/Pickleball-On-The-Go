@@ -26,7 +26,7 @@ export function validMessage(msg) {
   const allowed = {
     swing: [],
     pose: ['player'],
-    state: ['player', 'players', 'ready_for', 'last_hitter'],
+    state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections'],
     ruling: [],
     classification: [],
     ruling_evidence: [],
@@ -48,6 +48,10 @@ export function validMessage(msg) {
     case 'state': return finite(msg.t) && exactKeys(msg.ball, ['x', 'y', 'z', 'vx', 'vy', 'vz'])
       && Object.values(msg.ball).every(finite) && score(msg.score)
       && [1, 2].includes(msg.server) && typeof msg.phase === 'string'
+      && (msg.multiplayer === undefined || typeof msg.multiplayer === 'boolean')
+      && (msg.connections === undefined || (exactKeys(msg.connections, ['A', 'B'])
+        && Object.values(msg.connections).every(seat => exactKeys(seat, ['laptop', 'phone'])
+          && typeof seat.laptop === 'boolean' && typeof seat.phone === 'boolean')))
       && (msg.player === undefined || ['A', 'B'].includes(msg.player))
       && [undefined, null, 'A', 'B'].includes(msg.ready_for)
       && [undefined, null, 'A', 'B'].includes(msg.last_hitter)

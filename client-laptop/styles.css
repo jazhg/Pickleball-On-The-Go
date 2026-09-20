@@ -74,3 +74,7 @@ h1 { font: 650 clamp(35px, 3.5vw, 54px)/1.15 'Manrope', sans-serif; letter-spaci
 .evidence-events { margin: 6px 0 2px; padding-left: 18px; font-size: 10px; color: #8b9382; line-height: 1.7; }
 .analytics-details { border-top: 1px solid #e6e9df; padding: 17px 0 4px; }
 .analytics-strip { font-size: 10px !important; color: #8b9382 !important; line-height: 1.65; }
+:root .multiplayer-setup { margin: 16px 0; padding: 20px; border: 1px solid #dce2d7; border-radius: 16px; background: #fffef9; }
+.multiplayer-setup h3 { margin: 0 0 8px; }
+.multiplayer-setup p { font-size: 14px; color: #526359; }
+.multiplayer-setup a { overflow-wrap: anywhere; color: #20554c; }

@@ -122,6 +122,16 @@ function updatePhoneLinks() {
     link.href = url.href;
     if (link.matches('#transport-note a')) link.textContent = url.href;
   });
+  for (const player of ['A', 'B']) {
+    const laptopURL = new URL('/client-laptop/', phoneBaseURL);
+    laptopURL.searchParams.set('seat', player);
+    document.getElementById(`seat-${player.toLowerCase()}-link`).href = laptopURL.href;
+  }
+  const opponentURL = new URL('/client-laptop/', phoneBaseURL);
+  opponentURL.searchParams.set('seat', localPlayer === 'B' ? 'A' : 'B');
+  const invite = document.getElementById('opponent-link');
+  invite.href = opponentURL.href;
+  invite.textContent = opponentURL.href;
 }
 async function discoverPhoneURL() {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return;
@@ -182,13 +192,13 @@ function updateControls() {
     ui['phase-description'].textContent = 'No ball is in play. Request one when you’re ready.';
     ui['swing-hint'].textContent = 'Click Spawn ball here or on your phone.';
   } else if (phase === 'ready') {
-    ui['phase-title'].textContent = 'Ready when you are';
-    ui['phase-description'].textContent = 'The ball is at your paddle. Send it over the net.';
+    ui['phase-title'].textContent = canSwing ? 'Your serve' : `Player ${latestState.ready_for} is serving`;
+    ui['phase-description'].textContent = canSwing ? 'The ball is at your paddle. Send it over the net.' : 'Get ready to return the ball.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
   } else if (phase === 'rally') {
     ui['phase-title'].textContent = 'Ball in play';
-    ui['phase-description'].textContent = 'Follow the flight and watch the far-side bounce.';
-    ui['swing-hint'].textContent = 'After this shot, click Spawn ball to play again.';
+    ui['phase-description'].textContent = canSwing ? 'Ball incoming. Move into position and swing to return it.' : 'Your shot is in flight. Get ready for the return.';
+    ui['swing-hint'].textContent = canSwing ? 'Swing your phone or press space when the ball reaches you.' : 'Follow the rally on your court.';
   } else if (phase === 'reset') {
     ui['phase-title'].textContent = 'Shot finished';
     ui['phase-description'].textContent = 'The ball will clear, then you can request another.';
@@ -210,6 +220,11 @@ function isState(message) {
 }
 
 function receiveState(state) {
+  if (state.connections && localPlayer) {
+    const own = state.connections[localPlayer], other = state.connections[localPlayer === 'A' ? 'B' : 'A'];
+    document.getElementById('match-status').textContent = state.multiplayer ? 'LIVE TWO PLAYER' : 'SOLO PRACTICE';
+    document.getElementById('pairing-status').textContent = `Your phone: ${own.phone ? 'connected' : 'waiting'} · Opponent MacBook: ${other.laptop ? 'connected' : 'waiting'} · Opponent phone: ${other.phone ? 'connected' : 'waiting'}`;
+  }
   const previousPhase = latestState?.phase;
   if (state.players && court && typeof court.updateOpponent === 'function') {
     const opponentKey = localPlayer ? Object.keys(state.players).find((key) => key !== localPlayer) : Object.keys(state.players)[0];
@@ -267,7 +282,7 @@ function connect() {
   const url = new URL('/ws', window.location.href);
   url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('role', 'laptop');
-  const seat = new URLSearchParams(window.location.search).get('seat');
+  const seat = localPlayer || new URLSearchParams(window.location.search).get('seat');
   if (seat === 'A' || seat === 'B') url.searchParams.set('seat', seat);
   socket = new WebSocket(url);
   socket.addEventListener('open', () => {
@@ -283,6 +298,9 @@ function connect() {
     if (!message || typeof message !== 'object') return;
     if (message.type === 'hello' && ['A', 'B'].includes(message.player)) {
       localPlayer = message.player;
+      const assignedURL = new URL(window.location.href);
+      assignedURL.searchParams.set('seat', localPlayer);
+      window.history.replaceState(null, '', assignedURL);
       seatSign = localPlayer === 'A' ? 1 : -1;
       document.getElementById('seat-badge').textContent = `YOU ARE PLAYER ${localPlayer}`;
       updatePhoneLinks();

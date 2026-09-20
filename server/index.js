@@ -21,9 +21,9 @@ export function buildRallyEnvelope(sim) {
     const t = Math.round(e.time * 1000);
     if (e.type === 'contact') {
       lastHitter = e.player;
-      if (!serveLogged && e.player === 'A') {
+      if (!serveLogged) {
         // Serve-motion predicates are assumed compliant, not sensed; documented caveat.
-        events.push({ event: 'serve', player: 'A', method: 'volley', foot_legal: true,
+        events.push({ event: 'serve', player: e.player, method: 'volley', foot_legal: true,
           contact_above_waist: false, upward_motion: true, paddle_below_wrist: true, t });
         serveLogged = true;
       } else {
@@ -74,6 +74,11 @@ const lanAddresses = () => Object.values(networkInterfaces())
   .map(address => address.address);
 export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
   const sim = new Simulation();
+  let multiplayer = false;
+  const connections = () => Object.fromEntries(['A', 'B'].map(player => [player,
+    Object.fromEntries(['laptop', 'phone'].map(role => [role, [...hub.clients].some(client =>
+      client.player === player && client.role === role && client.readyState === WebSocket.OPEN)]))]));
+  const stateFor = player => ({ ...sim.state(player), multiplayer, connections: connections() });
   let lastClassification = null; // most recent shot, for the evidence panel
   let lastShot = null, nextShotId = 1;
   const sendToLaptops = (obj) => {
@@ -157,14 +162,21 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     });
   });
   hub.on('connection', ws => {
+    // A human joining B ends solo practice for this session, including across
+    // brief disconnects: the bot must never take over a human's return.
+    if (ws.player === 'B') multiplayer = true;
     ws.isAlive = true; ws.lastSwing = -Infinity;
     ws.controllerTokens = CONFIG.network.controllerRateBurst;
     ws.controllerRefillAt = performance.now();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
     const seat = ws.player || 'A';
+    if (ws.role === 'laptop' && !sim.players[seat]) {
+      sim.setPose({ t: Date.now(), type: 'pose', court_x: CONFIG.player.x,
+        court_y: CONFIG.player.homeDepth, torso_deg: 0, wrist_h: CONFIG.player.paddleHeight }, seat);
+    }
     ws.send(JSON.stringify({ type: 'hello', player: seat, role: ws.role }));
-    ws.send(JSON.stringify(sim.state(seat)));
+    ws.send(JSON.stringify(stateFor(seat)));
     if (ws.role === 'laptop' && lastShot) ws.send(JSON.stringify(lastShot));
     const opponentPose = sim.players[seat === 'A' ? 'B' : 'A'];
     if (opponentPose) ws.send(JSON.stringify({ ...opponentPose, type: 'pose' }));
@@ -290,19 +302,26 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       botScheduled = false;
       if (botTimer) { clearTimeout(botTimer); botTimer = null; }
     }
+    if (multiplayer && botTimer) {
+      clearTimeout(botTimer);
+      botTimer = null;
+      botScheduled = true;
+    }
     // Return the current A shot's first in-bounds far-side bounce.
-    if (sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
+    // Solo mode gets the training return. When Player B has joined, the real
+    // Player B phone/laptop owns the next contact and the bot stays out.
+    if (!multiplayer && sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
       const landed = sim.events.some((e, index) => index > contactIndex && e.type === 'bounce' && e.in_bounds && e.z < 0);
       if (landed) {
         botScheduled = true;
-        botTimer = setTimeout(() => { botTimer = null; sim.botReturn(); }, 350);
+        botTimer = setTimeout(() => { botTimer = null; if (!multiplayer) sim.botReturn(); }, 350);
       }
     }
   }, 1000 / CONFIG.simulation.hz);
   const broadcast = setInterval(() => {
     for (const client of hub.clients) {
       if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 65536) continue;
-      const state = JSON.stringify(sim.state(client.player || 'A'));
+      const state = JSON.stringify(stateFor(client.player || 'A'));
       client.send(state);
     }
   }, 1000 / CONFIG.simulation.broadcastHz);

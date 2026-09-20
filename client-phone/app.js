@@ -67,7 +67,7 @@ function wireURL() {
   const url = new URL('/ws', window.location.href);
   url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('role', 'phone');
-  const seat = new URLSearchParams(window.location.search).get('seat');
+  const seat = localPlayer || new URLSearchParams(window.location.search).get('seat');
   if (seat === 'A' || seat === 'B') url.searchParams.set('seat', seat);
   return url;
 }
@@ -87,6 +87,9 @@ function connect() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg?.type === 'hello' && ['A', 'B'].includes(msg.player)) {
       localPlayer = msg.player;
+      const assignedURL = new URL(window.location.href);
+      assignedURL.searchParams.set('seat', localPlayer);
+      window.history?.replaceState(null, '', assignedURL);
       const badge = $('seat-badge');
       badge.textContent = `PLAYER ${localPlayer}`;
 

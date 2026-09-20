@@ -154,6 +154,58 @@ test('controller poses are normalized, rate limited, and paired to the matching 
   }
 });
 
+test('two live player stations share one rally without the solo bot taking Player B turns', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const port = relay.server.address().port;
+  const endpoint = `ws://127.0.0.1:${port}/ws`;
+  const clients = [];
+  try {
+    const aLaptop = await openClient(`${endpoint}?role=laptop&seat=A`); clients.push(aLaptop.ws);
+    const bLaptop = await openClient(`${endpoint}?role=laptop&seat=B`); clients.push(bLaptop.ws);
+    const aPhone = await openClient(`${endpoint}?role=phone&seat=A`); clients.push(aPhone.ws);
+    const bPhone = await openClient(`${endpoint}?role=phone&seat=B`); clients.push(bPhone.ws);
+    assert.equal(aLaptop.hello.player, 'A');
+    assert.equal(bLaptop.hello.player, 'B');
+    assert.equal(aPhone.hello.player, 'A');
+    assert.equal(bPhone.hello.player, 'B');
+    assert.equal(bPhone.state.multiplayer, true);
+    assert.deepEqual(bPhone.state.connections, { A: { laptop: true, phone: true }, B: { laptop: true, phone: true } });
+
+    // A starts the point. The ball is ready for A on every connected view.
+    aPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+    await waitForMessage(aLaptop.ws, message => message.type === 'state' && message.phase === 'ready' && message.ready_for === 'A');
+    aPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
+    await waitForMessage(bLaptop.ws, message => message.type === 'state' && message.phase === 'rally' && message.last_hitter === 'A');
+
+    // Give B a current phone pose, then hit from B. The contact must be B's,
+    // proving the live opponent owns the return instead of the training bot.
+    // A landed shot would trigger the old bot after 350ms. Humans must retain
+    // the turn even after that delay and if B briefly loses both connections.
+    relay.sim.events.push({ type: 'bounce', time: relay.sim.age, x: 0, z: -3, in_bounds: true });
+    await new Promise(resolve => setTimeout(resolve, 450));
+    assert.equal(relay.sim.lastHitter, 'A');
+    bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0 }));
+    Object.assign(relay.sim.ball, relay.sim.paddle('B'));
+    bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
+    await waitForMessage(aLaptop.ws, message => message.type === 'state' && message.phase === 'rally' && message.last_hitter === 'B');
+    assert.equal(relay.sim.events.filter(event => event.type === 'contact').at(-1).player, 'B');
+    assert.equal(relay.sim.events.some(event => event.type === 'contact' && event.player === 'B'), true);
+    assert.ok(relay.sim.ball.vz > 0, 'B returns toward A in the shared world');
+    Object.assign(relay.sim.ball, relay.sim.paddle('A'));
+    aPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
+    await waitForMessage(bLaptop.ws, message => message.type === 'state' && message.last_hitter === 'A');
+    const closedLaptop = once(bLaptop.ws, 'close'), closedPhone = once(bPhone.ws, 'close');
+    bLaptop.ws.close(); bPhone.ws.close();
+    await Promise.all([closedLaptop, closedPhone]);
+    relay.sim.events.push({ type: 'bounce', time: relay.sim.age, x: 0, z: -3, in_bounds: true });
+    await new Promise(resolve => setTimeout(resolve, 450));
+    assert.equal(relay.sim.lastHitter, 'A', 'disconnect never activates the bot in a human match');
+  } finally {
+    for (const client of clients) client.close();
+    await relay.close();
+  }
+});
+
 test('contact uses latest phone aim even after visual rate limiting, without leaking to keyboard', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws`;
