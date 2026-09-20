@@ -35,11 +35,23 @@ const ui = Object.fromEntries([
   'last-shot-detail', 'last-ruling', 'shot-count', 'shot-flash', 'transport-note',
   'voice-toggle', 'evidence-panel', 'evidence-rule', 'evidence-events',
   'evidence-shot', 'analytics-strip', 'practice-button',
+  'nemotron-popup', 'nemotron-popup-title', 'nemotron-popup-text',
 ].map((id) => [id, document.getElementById(id)]));
 
 // --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
 let classifyTimer = null;
+let popupTimer = null;
 const analytics = { shots: {}, confSum: 0, confN: 0, rallies: 0, errors: 0 };
+
+function showNemotronPopup(title, text, tone = 'neutral') {
+  if (!ui['nemotron-popup'] || !text) return;
+  ui['nemotron-popup'].className = `nemotron-popup ${tone}`;
+  ui['nemotron-popup-title'].textContent = title;
+  ui['nemotron-popup-text'].textContent = String(text).slice(0, 110);
+  ui['nemotron-popup'].setAttribute('aria-hidden', 'false');
+  clearTimeout(popupTimer);
+  popupTimer = setTimeout(() => ui['nemotron-popup'].setAttribute('aria-hidden', 'true'), 3600);
+}
 
 
 function renderAnalytics() {
@@ -329,6 +341,7 @@ function receiveRuling(message) {
     || message.score.length !== 2 || !message.score.every((n) => Number.isInteger(n) && n >= 0)) return;
   const reference = message.rule === 'none' ? '' : ` · ${message.rule}`;
   ui['last-ruling'].textContent = `${message.fault ? `Fault${message.player ? ` · ${teamName(message.player)}` : ''}` : 'No fault'}${reference}. ${message.explanation}`;
+  showNemotronPopup(message.fault ? `FAULT · ${message.player ? teamName(message.player).toUpperCase() : 'REFEREE'}` : 'RALLY REVIEW', message.explanation, message.fault ? 'fault' : 'call');
   ui['score-a'].textContent = String(message.score[0]).padStart(2, '0');
   ui['score-b'].textContent = String(message.score[1]).padStart(2, '0');
   analytics.rallies += 1;
@@ -386,7 +399,7 @@ function connect() {
     }
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
-    else if (message.type === 'classification') receiveClassification(message);
+    else if (message.type === 'classification') { receiveClassification(message); if (message.path === 'model') showNemotronPopup('NEMOTRON READ', `${message.shot.replace('_', ' ')} · ${message.target_zone.replace('_', ' ')}`, 'read'); }
     else if (message.type === 'ruling_evidence') receiveRulingEvidence(message);
   });
   socket.addEventListener('close', () => {

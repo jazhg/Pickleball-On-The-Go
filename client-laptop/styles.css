@@ -56,6 +56,15 @@ p { font-size:12px; line-height:1.65; color:var(--muted); }
 .render-status,.script-error { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; background:#182f29; text-align:center; padding:40px; }.render-status>span:last-child { max-width:440px; font-size:13px; color:#bfcfbd; }
 .loading-ring { width:26px; height:26px; border:2px solid #ffffff30; border-top-color:white; border-radius:50%; animation:spin 1s linear infinite; }.render-status.failed .loading-ring { animation:none; border-color:var(--red); }
 .shot-flash { position:fixed; left:50%; top:110px; transform:translateX(-50%); opacity:0; pointer-events:none; transition:opacity .2s; background:#101a25cc; padding:10px 15px; border-radius:8px; font-size:11px; letter-spacing:1px; }.shot-flash.visible { opacity:1; }
+.nemotron-popup { position:fixed; z-index:6; left:50%; top:clamp(120px,18vh,190px); width:min(330px,calc(100% - 40px)); transform:translate(-50%,-10px) rotate(-1deg); padding:14px 18px 16px; opacity:0; pointer-events:none; border:2px solid #fff; border-radius:14px 16px 12px 18px; background:#101a25ee; box-shadow:7px 7px 0 #0008, 0 0 0 3px #ffffff22; color:#fff; text-align:center; transition:opacity .18s,transform .18s; }
+.nemotron-popup[aria-hidden="false"] { opacity:1; transform:translate(-50%,0) rotate(-1deg); }
+.nemotron-popup::after { content:""; position:absolute; bottom:-13px; left:30%; width:20px; height:20px; background:inherit; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg); }
+.nemotron-popup-label { display:block; color:#d9f582; font-size:9px; font-weight:900; letter-spacing:1.8px; }
+.nemotron-popup strong { display:block; margin-top:5px; font-size:18px; letter-spacing:.8px; }
+.nemotron-popup p { margin:6px 0 0; color:#f0f4e8; font-size:12px; line-height:1.35; }
+.nemotron-popup.fault { border-color:#ff8585; }.nemotron-popup.fault .nemotron-popup-label { color:#ff8585; }
+.nemotron-popup.call { border-color:#83baff; }.nemotron-popup.call .nemotron-popup-label { color:#83baff; }
+.nemotron-popup.read { border-color:#d9f582; }
 @keyframes spin { to { transform:rotate(360deg); } }
 @media(max-width:1050px) { .game-hud { gap:12px; padding:12px; max-width:calc(100% - 120px); left:calc(50% + 35px); }.menu-toggle span { display:none; }.phase-indicator { padding-left:12px; }.connection-status { display:none; } }
 @media(max-width:650px) { .game-hud { gap:8px; top:12px; max-width:calc(100% - 70px); left:calc(50% + 27px); padding:10px; border-radius:12px; }.menu-toggle { left:8px; top:16px; padding:9px; }.scoreboard,.scoreboard>div { gap:6px; }.scoreboard strong { font-size:22px; }.player-label { font-size:9px; letter-spacing:0; } #seat-badge { display:none; }.player-label.is-local::after { content:'· YOU'; font-size:8px; }.phase-indicator { font-size:10px; white-space:normal; max-width:85px; padding-left:8px; }.phase-dot { display:none; }.spawn-button { font-size:10px; padding:8px; } }
