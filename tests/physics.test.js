@@ -88,7 +88,8 @@ test('extreme phone angles and force cannot launch the ball above two meters', (
 test('ready ball follows the tracked player; airborne ball does not', () => {
   const sim = new Simulation(); sim.spawn();
   sim.setPose({ t: 1, type: 'pose', court_x: 1, court_y: 4.8, torso_deg: 0, wrist_h: 1 });
-  assert.equal(sim.ball.x, 1); assert.equal(sim.ball.z, 4.35);
+  assert.equal(sim.ball.x, 1 + CONFIG.render.neutralPaddleOffset.x);
+  assert.equal(sim.ball.z, 4.8 + CONFIG.render.neutralPaddleOffset.z);
   assert.equal(sim.swing(swing), true);
   const x = sim.ball.x;
   sim.setPose({ ...sim.players.A, court_x: -1 }, 'A');
@@ -139,4 +140,29 @@ test('wire contract accepts design messages and rejects mutations/non-finite val
   assert.equal(validMessage({ ...swing, duration_ms: -1 }), false);
   assert.equal(validMessage({ t: 1, type: 'pose', player: '', court_x: 0, court_y: 5, torso_deg: 0, wrist_h: 1 }), false);
   assert.equal(parseMessage('{bad json'), null);
+});
+
+test('phone paddle bearing controls shots for both seats without sideways aim assist', () => {
+  for (const player of ['A', 'B']) {
+    for (const degrees of [-70, -45, 0, 45, 70, 120]) {
+      const sim = new Simulation();
+      sim.setPose({ t: 1, type: 'pose', court_x: 1, court_y: 5, torso_deg: 80, wrist_h: 0.95 }, player);
+      sim.spawn(player);
+      const yaw = (180 - degrees) * Math.PI / 180;
+      const aim = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2) };
+      assert.equal(sim.swing({ ...swing, roll: -90 }, player, aim), true);
+      const sign = player === 'A' ? 1 : -1;
+      const bearing = Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) * 180 / Math.PI;
+      assert.ok(Math.abs(bearing - degrees) < 1e-10, `${player}: expected ${degrees}, got ${bearing}`);
+      assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
+    }
+  }
+});
+
+test('missing or invalid paddle orientation retains keyboard shot behavior', () => {
+  const expected = new Simulation(); expected.spawn(); expected.swing(swing);
+  for (const aim of [null, { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 0 }]) {
+    const sim = new Simulation(); sim.spawn(); sim.swing(swing, 'A', aim);
+    assert.deepEqual(sim.ball, expected.ball);
+  }
 });

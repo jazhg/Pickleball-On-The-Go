@@ -67,7 +67,7 @@ export const CONFIG = Object.freeze({
     eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
     paddlePositionAlpha: 0.24, // 0.12–0.4: higher follows the wrist faster but admits more jitter.
     paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
-    neutralPaddleOffset: { x: 0.42, y: -0.34, z: -0.62 }, // Camera-local metres; z stays in front of the near plane.
+    neutralPaddleOffset: { x: 0.42, y: -0.60, z: -1.05 }, // Camera-local metres; z stays in front of the near plane.
     maxWristOffset: { x: 0.42, y: 0.38, z: 0.22 }, // 0.2–0.6 m per axis: clamp landmark noise to the visible view.
   },
   tracking: {

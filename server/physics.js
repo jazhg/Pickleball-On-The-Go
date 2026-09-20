@@ -1,3 +1,4 @@
+import { paddleCenter } from '../shared/paddle-motion.js';
 import { normalizeControllerPose } from '../shared/protocol.js';
 import { CONFIG } from '../shared/config.js';
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -20,6 +21,7 @@ export class Simulation {
     this.config = config;
     this.pose = null;
     this.players = { A: null, B: null };
+    this.controllers = { A: null, B: null };
     this.score = [0, 0];
     this.servingTeam = 'A';
     this.reset();
@@ -54,11 +56,8 @@ export class Simulation {
   }
   spawn(player = 'A') {
     if (this.phase !== 'idle') return false;
-    const p = this.config.player;
-    const s = seatSign(player);
     const paddle = this.paddle(player);
-    const setback = s * (p.homeDepth - p.feedDepth);
-    this.ball = { x: paddle.x, y: paddle.y, z: paddle.z - setback, vx: 0, vy: 0, vz: 0 };
+    this.ball = { x: paddle.x, y: paddle.y, z: paddle.z, vx: 0, vy: 0, vz: 0 };
     this.events = [];
     this.bounces = 0;
     this.age = 0;
@@ -83,25 +82,27 @@ export class Simulation {
     this.pose = normalized;
     this.players[player] = normalized;
     if (this.phase === 'ready' && this.readyFor === player) {
-      const p = c.player;
-      this.ball.x = normalized.court_x;
-      this.ball.z = normalized.court_y - s * (p.homeDepth - p.feedDepth);
+      Object.assign(this.ball, this.paddle(player));
     }
   }
+  setController(pose, player = 'A') {
+    this.controllers[player] = pose;
+    if (this.phase === 'ready' && this.readyFor === player) Object.assign(this.ball, this.paddle(player));
+  }
   paddle(player = 'A') {
-    const p = this.config.player;
-    const pose = this.players[player];
-    if (pose) return { x: pose.court_x, y: pose.wrist_h, z: pose.court_y };
-    return { x: p.x, y: p.paddleHeight, z: seatSign(player) * p.homeDepth };
+    const pose = this.players[player], p = this.config.player;
+    return paddleCenter({ x: pose?.court_x ?? p.x, z: pose?.court_y ?? seatSign(player) * p.homeDepth }, player, this.controllers[player] || {}, this.config);
   }
   swing(msg, player = 'A', controllerPose = null) {
     const canServe = this.phase === 'ready' && this.readyFor === player;
     const canReturn = this.phase === 'rally' && this.lastHitter !== player;
     if (!canServe && !canReturn) return false;
 
+    if (controllerPose) this.setController(controllerPose, player);
     const ball = this.ball, paddle = this.paddle(player), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
 
+    Object.assign(ball, paddle);
     const attack = -seatSign(player);
     const right = seatSign(player);
     const pose = this.players[player];

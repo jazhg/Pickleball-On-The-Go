@@ -31,7 +31,7 @@ export function validMessage(msg) {
     classification: [],
     ruling_evidence: [],
     spawn: [],
-    controller_pose: [],
+    controller_pose: ['px', 'py', 'pz'],
     hello: [],
   };
   const extras = Object.keys(msg).filter(key => !required.includes(key));
@@ -73,6 +73,8 @@ export function validMessage(msg) {
     case 'spawn': return finite(msg.t) && msg.t >= 0;
     case 'controller_pose': {
       if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;
+      const hasPosition = ['px', 'py', 'pz'].some(k => Object.hasOwn(msg, k));
+      if (hasPosition && !['px', 'py', 'pz'].every(k => finite(msg[k]) && Math.abs(msg[k]) <= 0.4)) return false;
       const lengthSquared = msg.qx ** 2 + msg.qy ** 2 + msg.qz ** 2 + msg.qw ** 2;
       return lengthSquared >= 1e-8 && lengthSquared <= 1e8;
     }

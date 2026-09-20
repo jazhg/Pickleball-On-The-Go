@@ -153,3 +153,33 @@ test('controller poses are normalized, rate limited, and paired to the matching 
     phoneA?.close(); laptopB?.close(); laptopA?.close(); await relay.close();
   }
 });
+
+test('contact uses latest phone aim even after visual rate limiting, without leaking to keyboard', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws`;
+  let phone, laptop;
+  try {
+    phone = (await openClient(`${endpoint}?role=phone&seat=B`)).ws;
+    laptop = (await openClient(`${endpoint}?role=laptop&seat=B`)).ws;
+    relay.sim.spawn('B');
+    const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0 };
+    for (let i = 0; i < 8; i++) phone.send(JSON.stringify(pose));
+    // 45 degrees to the player's right, delivered immediately before contact.
+    phone.send(JSON.stringify({ ...pose, qy: Math.sin(3 * Math.PI / 8), qw: Math.cos(3 * Math.PI / 8) }));
+    const shot = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'phone');
+    phone.send(JSON.stringify({ t: 2, type: 'swing', ...CONFIG.swing.synthetic }));
+    assert.equal((await shot).accepted, true);
+    const contact = relay.sim.events.find(e => e.type === 'contact').ball;
+    assert.ok(contact.vx < 0 && contact.vz > 0);
+    assert.ok(Math.abs(contact.vx / contact.vz + 1) < 1e-10);
+
+    relay.sim.reset(); relay.sim.spawn('B');
+    const keyboard = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'laptop');
+    laptop.send(JSON.stringify({ t: 3, type: 'swing', ...CONFIG.swing.synthetic }));
+    assert.equal((await keyboard).accepted, true);
+    const fallback = relay.sim.events.find(e => e.type === 'contact').ball;
+    assert.ok(Math.abs(fallback.vx / fallback.vz) < 0.5);
+  } finally {
+    phone?.close(); laptop?.close(); await relay.close();
+  }
+});

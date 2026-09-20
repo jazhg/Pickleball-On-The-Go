@@ -1,3 +1,4 @@
+import { paddleCenter } from '/shared/paddle-motion.js';
 import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
@@ -486,32 +487,35 @@ function createCourt(THREE) {
   playerRing.rotation.x = -Math.PI / 2;
   scene.add(playerRing);
 
-  // Camera-local first-person paddle. Geometry/materials are created once and the
-  // whole assembly inherits court movement and jump height from the camera.
+  // Court-space paddle shares its center with authoritative ball contacts.
   const paddle = new THREE.Group();
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32), new THREE.MeshStandardMaterial({ color: '#dbe86b', roughness: 0.55, metalness: 0.03 }));
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32), new THREE.MeshStandardMaterial({ color: '#dbe86b', roughness: 0.55, metalness: 0.03, transparent: true, opacity: 0.48, depthWrite: false }));
   face.rotation.x = Math.PI / 2;
   face.scale.set(0.92, 1, 1.22);
   face.castShadow = true;
   paddle.add(face);
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 8, 32), new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7 }));
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 8, 32), new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7, transparent: true, opacity: 0.6, depthWrite: false }));
   rim.scale.y = 1.22;
   rim.castShadow = true;
   paddle.add(rim);
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.055), new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9 }));
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.055), new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9, transparent: true, opacity: 0.6, depthWrite: false }));
   handle.position.y = -0.28;
   handle.castShadow = true;
   paddle.add(handle);
   const paddleTargetPosition = new THREE.Vector3(CONFIG.render.neutralPaddleOffset.x, CONFIG.render.neutralPaddleOffset.y, CONFIG.render.neutralPaddleOffset.z);
   const paddleTargetQuaternion = new THREE.Quaternion(0, 0, 0, 1);
   paddle.position.copy(paddleTargetPosition);
-  camera.add(paddle);
+  scene.add(paddle);
+  let paddleMotion = {};
+  let readyAtPaddle = false;
+  const seatRotation = new THREE.Quaternion();
   function updateTracking(state) {
     if (!state?.wristOffset || !Number.isFinite(state.jumpHeight)) return;
-    paddleTargetPosition.set(state.wristOffset.x, state.wristOffset.y, Math.min(-0.22, state.wristOffset.z));
+    // Paddle translation comes from the phone; body tracking controls the player.
   }
   function updateController(pose) {
     if (!validMessage(pose)) return;
+    paddleMotion = pose;
     paddleTargetQuaternion.set(pose.qx, pose.qy, pose.qz, pose.qw).normalize();
   }
   updateTracking(trackingRenderState);
@@ -546,6 +550,7 @@ function createCourt(THREE) {
     trailGeometry.setDrawRange(0, 0);
   }
   function applyState(state, previousPhase) {
+    readyAtPaddle = state.phase === 'ready' && state.ready_for === localPlayer;
     if (state.phase !== 'rally' || previousPhase !== 'rally') clearTrail();
     ball.visible = ballShadow.visible = state.phase !== 'idle';
     ball.position.set(state.ball.x, state.ball.y, state.ball.z);
@@ -592,8 +597,11 @@ function createCourt(THREE) {
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
-    paddle.position.lerp(paddleTargetPosition, CONFIG.render.paddlePositionAlpha);
-    paddle.quaternion.slerp(paddleTargetQuaternion, CONFIG.render.paddleRotationAlpha);
+    const center = paddleCenter(playerPosition, localPlayer, paddleMotion);
+    paddle.position.set(center.x, center.y, center.z);
+    seatRotation.set(0, seatSign > 0 ? 0 : 1, 0, seatSign > 0 ? 1 : 0);
+    paddle.quaternion.copy(seatRotation).multiply(paddleTargetQuaternion);
+    if (readyAtPaddle) ball.position.copy(paddle.position);
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {

@@ -1,3 +1,4 @@
+import { PaddleMotion, rotateVector } from '/shared/paddle-motion.js';
 import { orientationQuaternion, forwardReference, relativeOrientation } from '/shared/controller-orientation.js';
 import { CONFIG } from '/shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '/shared/swing-detector.js';
@@ -13,6 +14,8 @@ const ui = {
   recenter: $('recenter-button'),
 };
 const detector = new SwingDetector(CONFIG);
+const paddleMotion = new PaddleMotion();
+let lastMotionSwingAt = -Infinity;
 let socket;
 let reconnectTimer;
 let reconnectAttempt = 0;
@@ -29,6 +32,7 @@ let localPlayer = null;
 let readyFor = null;
 let lastHitter = null;
 let latestOrientation = null;
+let latestOrientationAt = -Infinity;
 let neutralOrientation = null;
 let controllerTimer = null;
 const spawnButton = $('spawn-button');
@@ -196,13 +200,15 @@ function onOrientation(event) {
   const q = orientationQuaternion(event, platform);
   if (!q) return;
   latestOrientation = q;
+  latestOrientationAt = performance.now();
   if (!neutralOrientation) neutralOrientation = forwardReference(q);
 }
 function sendControllerPose() {
   if (!latestOrientation || !neutralOrientation || socket?.readyState !== WebSocket.OPEN) return;
+  if (performance.now() - latestOrientationAt > CONFIG.controller.poseTimeoutMs) return;
   const q = relativeOrientation(latestOrientation, neutralOrientation);
   if (!q) return;
-  socket.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: q.x, qy: q.y, qz: q.z, qw: q.w }));
+  socket.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: q.x, qy: q.y, qz: q.z, qw: q.w, ...paddleMotion.pose() }));
 }
 
 function onMotion(event) {
@@ -212,7 +218,19 @@ function onMotion(event) {
   lastSensorAt = now;
   const swing = detector.update({ t: now, acceleration: { x: raw.x, y: raw.y, z: raw.z }, rotationRate: event.rotationRate || {} });
   updateReadings();
-  if (swing) sendSwing(swing, false);
+  let movementSwing = null;
+  if (latestOrientation && neutralOrientation && now - latestOrientationAt <= CONFIG.controller.poseTimeoutMs) {
+    const q = relativeOrientation(latestOrientation, neutralOrientation);
+    let linear = event.acceleration;
+    if (!linear || !['x', 'y', 'z'].every(axis => Number.isFinite(linear[axis]))) {
+      const gravity = rotateVector({ x: 0, y: CONFIG.physics.gravity, z: 0 }, { x: -q.x, y: -q.y, z: -q.z, w: q.w });
+      linear = { x: raw.x - gravity.x, y: raw.y - gravity.y, z: raw.z - gravity.z };
+    }
+    movementSwing = paddleMotion.update(now, linear, q);
+  }
+  if ((movementSwing || swing) && now - lastMotionSwingAt >= 350) {
+    if (sendSwing(movementSwing || swing, false)) lastMotionSwingAt = now;
+  }
 }
 
 function loadCalibration() {
@@ -269,6 +287,7 @@ ui.recenter.addEventListener('click', () => {
     return;
   }
   neutralOrientation = reference;
+  paddleMotion.reset();
   ui.sensorDetail.textContent = 'Forward direction set. The paddle now follows the phone’s screen.';
   sendControllerPose();
 });

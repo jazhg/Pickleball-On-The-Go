@@ -1,3 +1,4 @@
+import { PaddleMotion, rotateVector } from '../shared/paddle-motion.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -55,7 +56,7 @@ test('phone events send live poses and recenter without browser screen errors', 
     send(value) { sent.push(JSON.parse(value)); }
   }
   const context = vm.createContext({
-    CONFIG, SwingDetector, calibratedPeakG, validCalibration,
+    PaddleMotion, rotateVector, CONFIG, SwingDetector, calibratedPeakG, validCalibration,
     orientationQuaternion, forwardReference, relativeOrientation,
     document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
     window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' }, isSecureContext: true,

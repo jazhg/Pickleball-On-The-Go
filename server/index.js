@@ -189,6 +189,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         // Keep contact aim fresh even when visual updates exhaust the relay budget.
         ws.controllerPose = pose;
         ws.controllerPoseAt = now;
+        sim.setController(pose, ws.player);
         ws.controllerTokens = Math.min(CONFIG.network.controllerRateBurst,
           ws.controllerTokens + (now - ws.controllerRefillAt) * CONFIG.network.controllerHz / 1000);
         ws.controllerRefillAt = now;
