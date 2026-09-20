@@ -77,7 +77,11 @@ function phoneHarness() {
   }
   const context = vm.createContext({
     PaddleMotion, CONFIG, SwingDetector, orientationQuaternion, forwardReference, relativeOrientation,
-    document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
+    document: { getElementById: getNode, body: { dataset: {} },
+      querySelector(selector) {
+        assert.ok(selector === 'meta[name="theme-color"]' || selector === '.practice-label');
+        return {};
+      } }, navigator: { userAgent: 'iPhone' },
     window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' },
       DeviceMotionEvent: {}, DeviceOrientationEvent: {}, addEventListener(type, handler) { events[type] = handler; } },
     WebSocket: Socket, URL, URLSearchParams, performance: { now: () => now },
