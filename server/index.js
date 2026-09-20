@@ -76,6 +76,7 @@ const lanAddresses = () => Object.values(networkInterfaces())
 export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
   const sim = new Simulation();
   let multiplayer = false;
+  let practiceEnabled = false, practicePlayer = 'A', nextPracticeFeedAt = Infinity;
   const connections = () => Object.fromEntries(['A', 'B'].map(player => [player,
     Object.fromEntries(['laptop', 'phone'].map(role => [role, [...hub.clients].some(client =>
       client.player === player && client.role === role && client.readyState === WebSocket.OPEN)]))]));
@@ -218,6 +219,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     }
     ws.send(JSON.stringify({ type: 'hello', player: seat, role: ws.role }));
     ws.send(JSON.stringify(stateFor(seat)));
+    ws.send(JSON.stringify({ t: Date.now(), type: 'practice', enabled: practiceEnabled, player: practicePlayer }));
     if (ws.role === 'laptop' && lastShot) ws.send(JSON.stringify(lastShot));
     const opponentPose = sim.players[seat === 'A' ? 'B' : 'A'];
     if (opponentPose) ws.send(JSON.stringify({ ...opponentPose, type: 'pose' }));
@@ -291,6 +293,12 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       } else if (msg.type === 'spawn') {
         const player = ws.player || 'A';
         if (sim.spawn(player)) announce(player === 'A' ? 'red_serves' : 'blue_serves');
+      } else if (msg.type === 'practice' && ws.role === 'laptop') {
+        practiceEnabled = msg.enabled;
+        practicePlayer = ws.player || 'A';
+        nextPracticeFeedAt = practiceEnabled ? performance.now() : Infinity;
+        if (!practiceEnabled) sim.reset();
+        sendToLaptops({ t: Date.now(), type: 'practice', enabled: practiceEnabled, player: practicePlayer });
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
         const seat = ws.player || 'A';
         sim.setPose(msg, seat);
@@ -335,6 +343,10 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   let lastBounceSoundAt = -Infinity;
   const tick = setInterval(() => {
     const now = performance.now();
+    if (practiceEnabled && now >= nextPracticeFeedAt) {
+      sim.practiceFeed(practicePlayer);
+      nextPracticeFeedAt = now + CONFIG.practice.feedIntervalMs;
+    }
     accumulator += Math.min((now - previous) / 1000, CONFIG.simulation.maxCatchupSeconds);
     previous = now;
     while (accumulator >= step) {
@@ -349,7 +361,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     }
     if (sim.phase !== prevPhase) {
       if (sim.phase === 'rally') botScheduled = false;
-      if (prevPhase === 'rally' && sim.phase === 'reset') {
+      if (!practiceEnabled && prevPhase === 'rally' && sim.phase === 'reset') {
         if (botTimer) { clearTimeout(botTimer); botTimer = null; }
         onRallyComplete();
       }
@@ -371,7 +383,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     // Return the current A shot's first in-bounds far-side bounce.
     // Solo mode gets the training return. When Player B has joined, the real
     // Player B phone/laptop owns the next contact and the bot stays out.
-    if (!multiplayer && sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
+    if (!practiceEnabled && !multiplayer && sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
       const landed = sim.events.some((e, index) => index > contactIndex && e.type === 'bounce' && e.in_bounds && e.z < 0);
       if (landed) {
         botScheduled = true;

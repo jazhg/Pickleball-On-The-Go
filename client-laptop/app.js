@@ -34,7 +34,7 @@ const ui = Object.fromEntries([
   'phase-description', 'swing-button', 'swing-hint', 'last-shot',
   'last-shot-detail', 'last-ruling', 'shot-count', 'shot-flash', 'transport-note',
   'voice-toggle', 'evidence-panel', 'evidence-rule', 'evidence-events',
-  'evidence-shot', 'analytics-strip',
+  'evidence-shot', 'analytics-strip', 'practice-button',
 ].map((id) => [id, document.getElementById(id)]));
 
 // --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
@@ -103,6 +103,7 @@ let trackingRenderState = {
   jumpHeight: 0,
 };
 let controllerPose = { qx: 0, qy: 0, qz: 0, qw: 1 };
+let practiceEnabled = false;
 let phoneBaseURL = new URL('/client-phone/', location.href);
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
@@ -111,6 +112,10 @@ spawnButton.addEventListener('click', () => {
     socket.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
   }
   updateControls();
+});
+ui['practice-button'].addEventListener('click', () => {
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ t: Date.now(), type: 'practice', enabled: !practiceEnabled }));
 });
 
 function receivePose(pose) {
@@ -156,6 +161,7 @@ async function discoverPhoneURL() {
     }
   } catch { /* Keep the current-origin fallback if LAN discovery is unavailable. */ }
 }
+
 setupTracking({ onPose(pose, trackingState) {
   if (trackingState) {
     trackingRenderState = trackingState;
@@ -185,7 +191,10 @@ function updateControls() {
     (phase === 'rally' && latestState?.last_hitter && latestState.last_hitter !== localPlayer)
   );
   ui['swing-button'].disabled = !canSwing;
-  spawnButton.disabled = !(connected && rendererReady && phase === 'idle');
+  ui['practice-button'].disabled = !(connected && rendererReady && localPlayer);
+  ui['practice-button'].textContent = practiceEnabled ? 'Practice: On' : 'Practice: Off';
+  ui['practice-button'].setAttribute('aria-pressed', String(practiceEnabled));
+  spawnButton.disabled = practiceEnabled || !(connected && rendererReady && phase === 'idle');
   ui['phase-dot'].className = `phase-dot ${connected ? phase || '' : ''}`;
   if (!connected) {
     ui['phase-title'].textContent = 'Connecting to court';
@@ -208,8 +217,10 @@ function updateControls() {
     ui['phase-description'].textContent = canSwing ? 'The ball is waiting in front of you. Hit it to serve.' : 'Get ready to return the ball.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
   } else if (phase === 'rally') {
-    ui['phase-title'].textContent = 'Ball in play';
-    ui['phase-description'].textContent = canSwing ? 'Ball incoming. Move into position and swing to return it.' : 'Your shot is in flight. Get ready for the return.';
+    ui['phase-title'].textContent = practiceEnabled ? 'Practice feed' : 'Ball in play';
+    ui['phase-description'].textContent = practiceEnabled
+      ? 'A new ball arrives from the far side every three seconds.'
+      : canSwing ? 'Ball incoming. Move into position and swing to return it.' : 'Your shot is in flight. Get ready for the return.';
     ui['swing-hint'].textContent = canSwing ? 'Swing your phone or press space when the ball reaches you.' : 'Follow the rally on your court.';
   } else if (phase === 'reset') {
     ui['phase-title'].textContent = 'Shot finished';
@@ -327,6 +338,10 @@ function connect() {
     else if (message.type === 'referee_voice') refereeVoice.receive(message);
     else if (message.type === 'ground_bounce' && Number.isFinite(message.t)) playGroundBounce();
     else if (message.type === 'racket_hit' && Number.isFinite(message.t)) playRacketHit();
+    else if (message.type === 'practice' && typeof message.enabled === 'boolean') {
+      practiceEnabled = message.enabled && (!message.player || message.player === localPlayer);
+      updateControls();
+    }
     else if (message.type === 'controller_pose' && validMessage(message)) {
       controllerPose = message;
       court?.updateController(message);

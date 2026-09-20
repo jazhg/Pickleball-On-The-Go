@@ -9,6 +9,7 @@ const fields = {
   classification: ['t', 'type', 'shot', 'target_zone', 'confidence', 'path'],
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
   spawn: ['t', 'type'],
+  practice: ['t', 'type', 'enabled'],
   controller_pose: ['t', 'type', 'qx', 'qy', 'qz', 'qw'],
   hello: ['type', 'player', 'role'],
 };
@@ -31,6 +32,7 @@ export function validMessage(msg) {
     classification: [],
     ruling_evidence: [],
     spawn: [],
+    practice: ['player'],
     controller_pose: ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'],
     hello: [],
   };
@@ -75,6 +77,8 @@ export function validMessage(msg) {
         && SHOTS.has(msg.preceding_shot.shot) && ZONES.has(msg.preceding_shot.target_zone)
         && finite(msg.preceding_shot.confidence)));
     case 'spawn': return finite(msg.t) && msg.t >= 0;
+    case 'practice': return finite(msg.t) && msg.t >= 0 && typeof msg.enabled === 'boolean'
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player));
     case 'controller_pose': {
       if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;
       const motionFields = ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'];

@@ -5,26 +5,6 @@ import { CONFIG } from '../shared/config.js';
 import { validMessage, parseMessage } from '../shared/protocol.js';
 const swing = { t: 1234567, type: 'swing', ...CONFIG.swing.synthetic };
 
-test('soft phone serves and returns clear the net for both players while preserving aim', () => {
-  for (const player of ['A', 'B']) for (const serving of [true, false]) for (const degrees of [-20, 0, 20]) {
-    const sim = new Simulation(), sign = CONFIG.seats[player].sign;
-    const yaw = degrees * Math.PI / 180;
-    const aim = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2) };
-    sim.spawn(player);
-    if (!serving) {
-      sim.phase = 'rally'; sim.lastHitter = player === 'A' ? 'B' : 'A';
-      Object.assign(sim.ball, sim.paddle(player));
-    }
-    assert.equal(sim.swing({ ...swing, peak_g: CONFIG.calibration.softG }, player, aim), true);
-    assert.ok(Math.abs(Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) - yaw) < 1e-10);
-    let bounce;
-    for (let i = 0; i < 500 && !bounce; i++) { sim.step(); bounce = sim.events.find(e => e.type === 'bounce'); }
-    assert.ok(bounce && bounce.z * sign < 0, `${player} ${serving ? 'serve' : 'return'} at ${degrees} crosses before bouncing`);
-    assert.equal(sim.events.some(e => e.type === 'net_contact'), false);
-    assert.equal(bounce.in_bounds, true);
-  }
-});
-
 test('positive roll aims left and negative roll aims right', () => {
   const launch = roll => {
     const sim = new Simulation();
@@ -155,7 +135,7 @@ test('controller orientation has equivalent egocentric launch behavior for seats
     assert.equal(sim.swing(swing, player, controller), true);
     const sign = CONFIG.seats[player].sign;
     launches[player] = { right: sign * sim.ball.vx, forward: -sign * sim.ball.vz, up: sim.ball.vy };
-    assert.ok(launches[player].right > 0, `${player} sees the same right turn`);
+    assert.ok(Math.abs(launches[player].right) < 1e-9, `${player} launches straight despite paddle yaw`);
     assert.ok(launches[player].forward > 0, `${player} still launches into the far court`);
   }
   for (const axis of ['right', 'forward', 'up']) assert.ok(Math.abs(launches.A[axis] - launches.B[axis]) < 1e-9);
@@ -191,7 +171,7 @@ test('wire contract accepts design messages and rejects mutations/non-finite val
   assert.equal(parseMessage('{bad json'), null);
 });
 
-test('phone paddle bearing controls shots for both seats without sideways aim assist', () => {
+test('phone paddle yaw does not steer a straight stroke sideways for either seat', () => {
   for (const player of ['A', 'B']) {
     for (const degrees of [-70, -45, 0, 45, 70, 120]) {
       const sim = new Simulation();
@@ -202,7 +182,7 @@ test('phone paddle bearing controls shots for both seats without sideways aim as
       assert.equal(sim.swing({ ...swing, roll: -90 }, player, aim), true);
       const sign = player === 'A' ? 1 : -1;
       const bearing = Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) * 180 / Math.PI;
-      assert.ok(Math.abs(bearing - degrees) < 1e-10, `${player}: expected ${degrees}, got ${bearing}`);
+      assert.ok(Math.abs(bearing) < 1e-10, `${player}: expected straight launch, got ${bearing}`);
       assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
     }
   }

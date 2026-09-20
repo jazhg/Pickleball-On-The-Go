@@ -7,38 +7,6 @@ const SEAT = { A: 1, B: -1 };
 const seatSign = (player) => SEAT[player] ?? 1;
 const opponentOf = (player) => (player === 'A' ? 'B' : 'A');
 
-// Predict using the same drag and integration as the live ball. Only add loft
-// for a shot aimed through the net; never rotate the player's horizontal aim.
-function assistNetClearance(ball, config) {
-  const c = config.physics, court = config.court;
-  if (ball.z * ball.vz >= 0) return;
-  const crossingX = ball.x - ball.z * ball.vx / ball.vz;
-  if (Math.abs(crossingX) > court.width / 2 + c.ballRadius) return;
-  const target = court.netHeight + (court.netPostHeight - court.netHeight)
-    * Math.min(1, Math.abs(crossingX) / (court.width / 2)) + c.ballRadius + c.netClearance;
-  const clears = vy => {
-    const b = { ...ball, vy }, dt = 1 / config.simulation.hz;
-    for (let i = 0; i < config.simulation.hz * 3; i++) {
-      const oldZ = b.z, oldY = b.y, speed = Math.hypot(b.vx, b.vy, b.vz);
-      b.vx -= c.drag * speed * b.vx * dt;
-      b.vy -= (c.gravity + c.drag * speed * b.vy) * dt;
-      b.vz -= c.drag * speed * b.vz * dt;
-      b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-      if (oldZ * b.z <= 0) return oldY + (b.y - oldY) * oldZ / (oldZ - b.z) >= target;
-      if (b.y <= c.ballRadius) return false;
-    }
-    return false;
-  };
-  if (clears(ball.vy)) return;
-  let low = ball.vy, high = c.maxAssistedUpwardSpeed;
-  if (!clears(high)) { ball.vy = high; return; }
-  for (let i = 0; i < 10; i++) {
-    const mid = (low + high) / 2;
-    if (clears(mid)) high = mid; else low = mid;
-  }
-  ball.vy = high;
-}
-
 export function speedFromPeak(peak, calibration = CONFIG.calibration) {
   const c = calibration;
   if (peak <= 0) return CONFIG.physics.minSpeed;
@@ -101,6 +69,34 @@ export class Simulation {
     this.lastHitter = null;
     return true;
   }
+  practiceFeed(player = 'A') {
+    const c = this.config;
+    const sign = seatSign(player);
+    const receiver = this.players[player];
+    const startX = (Math.random() * 2 - 1) * c.practice.lateralSpread;
+    const startZ = -sign * (c.court.length / 2 - 0.8);
+    const targetX = clamp((receiver?.court_x ?? 0) + (Math.random() * 2 - 1) * 0.45,
+      -c.court.width / 2 + c.physics.ballRadius, c.court.width / 2 - c.physics.ballRadius);
+    const targetZ = receiver?.court_y ?? sign * c.player.homeDepth;
+    const flight = c.practice.flightSeconds;
+    this.ball = {
+      x: startX,
+      y: c.practice.launchHeight,
+      z: startZ,
+      vx: (targetX - startX) / flight,
+      vy: (c.physics.ballRadius - c.practice.launchHeight) / flight + c.physics.gravity * flight / 2,
+      vz: (targetZ - startZ) / flight,
+    };
+    this.phase = 'rally';
+    this.readyFor = null;
+    this.lastHitter = opponentOf(player);
+    this.bounces = 0;
+    this.age = 0;
+    this.resetIn = 0;
+    this.stationaryFor = 0;
+    this.events = [{ type: 'contact', player: opponentOf(player), time: 0, ball: { ...this.ball } }];
+    return true;
+  }
   setPose(pose, player = 'A') {
     const c = this.config;
     const s = seatSign(player);
@@ -150,7 +146,10 @@ export class Simulation {
       : Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = face ? Math.atan2(face.x, face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    // Phone yaw rotates the rendered paddle but is not a reliable swing-path
+    // measurement. A forward phone stroke should stay down the court even when
+    // the player happens to hold the paddle face angled left or right.
+    const azimuth = face ? 0 : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
 
     const raw = {
@@ -175,7 +174,6 @@ export class Simulation {
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;
     ball.vy = Math.min(ball.vy, c.maxUpwardSpeed);
-    assistNetClearance(ball, this.config);
 
     this.phase = 'rally';
     this.readyFor = null;

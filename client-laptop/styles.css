@@ -29,6 +29,7 @@ body[data-team="blue"] #seat-badge { color:var(--blue); }
 .phase-dot.ready,.connection-status.connected i { background:#a9e9b2; }.phase-dot.rally { background:#ffe391; }.connection-status.disconnected i { background:var(--red); }
 .connection-status { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); }
 .spawn-button { border:1px solid #ffffff30; border-radius:9px; padding:9px 12px; background:#ffffff12; font-size:12px; }
+.spawn-button[aria-pressed="true"] { background:#d5ef7230; border-color:#d5ef72; color:#f4ffbd; }
 .menu-toggle { position:fixed; top:max(24px,env(safe-area-inset-top)); left:20px; z-index:4; border:1px solid var(--border); background:#101a25dc; border-radius:12px; padding:12px; font-size:14px; }
 .menu-toggle span { margin-left:5px; font-size:11px; }
 .session-panel { position:fixed; inset:0 auto 0 0; margin:0; width:min(390px,100%); height:100%; max-height:100%; max-width:100%; overflow-y:auto; overscroll-behavior:contain; border:0; border-right:1px solid var(--border); background:#14202ff5; color:#eef3fa; padding:26px; box-shadow:10px 0 50px #0005; }
