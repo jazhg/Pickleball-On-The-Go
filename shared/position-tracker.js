@@ -82,10 +82,15 @@ export class PositionTracker {
     const wrist = landmarks[this.activeWrist];
     const relative = { x: (wrist.x - hipX) / shoulderWidth, y: (hipY - wrist.y) / bodySize, z: (Number.isFinite(wrist.z) ? wrist.z : 0) / shoulderWidth };
     const neutral = this.config.render.neutralPaddleOffset, max = this.config.render.maxWristOffset;
+    // The camera faces the player, so image-left is the player's right. Lateral
+    // wrist motion is negated to match the mirror, exactly as body position above
+    // already does — move your hand right and the paddle goes right on screen.
+    // Landmark depth is negative toward the camera and the view looks down -Z, so
+    // reaching out pushes the paddle away from the eye rather than back into it.
     const target = {
-      x: neutral.x + clamp((relative.x - this.reference.wrist.x) * c.shoulderMeters, -max.x, max.x),
+      x: neutral.x + clamp(-(relative.x - this.reference.wrist.x) * c.shoulderMeters, -max.x, max.x),
       y: neutral.y + clamp((relative.y - this.reference.wrist.y) * c.shoulderMeters, -max.y, max.y),
-      z: neutral.z + clamp(-(relative.z - this.reference.wrist.z) * c.shoulderMeters, -max.z, max.z),
+      z: neutral.z + clamp((relative.z - this.reference.wrist.z) * c.shoulderMeters, -max.z, max.z),
     };
     const alpha = this.config.render.paddlePositionAlpha;
     for (const axis of ['x', 'y', 'z']) this.wristOffset[axis] += alpha * (target[axis] - this.wristOffset[axis]);

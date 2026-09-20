@@ -8,6 +8,7 @@ const fields = {
   ruling: ['type', 'fault', 'player', 'rule', 'explanation', 'score', 'side_out'],
   classification: ['t', 'type', 'shot', 'target_zone', 'confidence', 'path'],
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
+  coach_tip: ['t', 'type', 'tip'],
   spawn: ['t', 'type'],
   controller_pose: ['t', 'type', 'qx', 'qy', 'qz', 'qw'],
   hello: ['type', 'player', 'role'],
@@ -30,6 +31,7 @@ export function validMessage(msg) {
     ruling: [],
     classification: [],
     ruling_evidence: [],
+    coach_tip: [],
     spawn: [],
     controller_pose: [],
     hello: [],
@@ -70,6 +72,8 @@ export function validMessage(msg) {
       && (msg.preceding_shot === null || (msg.preceding_shot
         && SHOTS.has(msg.preceding_shot.shot) && ZONES.has(msg.preceding_shot.target_zone)
         && finite(msg.preceding_shot.confidence)));
+    case 'coach_tip': return finite(msg.t) && msg.t >= 0 && typeof msg.tip === 'string'
+      && msg.tip.trim().length > 0 && msg.tip.length <= 200;
     case 'spawn': return finite(msg.t) && msg.t >= 0;
     case 'controller_pose': {
       if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;

@@ -2,7 +2,7 @@
 """Line-delimited JSON bridge between the Node relay and the Nemotron package.
 
 Reads one JSON request per line on stdin, writes one JSON response per line on
-stdout. Ops: ping, classify, referee. Never logs or echoes NVIDIA_API_KEY.
+stdout. Ops: ping, classify, referee, coach. Never logs or echoes NVIDIA_API_KEY.
 
 Offline (default) paths: heuristic classifier + provisional state-machine
 referee. Live model calls happen only when NEMOTRON_LIVE=1 AND NVIDIA_API_KEY
@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from baseline import adjudicate  # noqa: E402
+from coach import coach_with_metadata  # noqa: E402
 from classifier import classify_with_metadata, heuristic_classify  # noqa: E402
 from referee import referee_with_metadata  # noqa: E402
 from schema import SHOTS, ZONES  # noqa: E402
@@ -79,7 +80,14 @@ def op_referee(req):
             "next_state": out.get("next_state")}
 
 
-OPS = {"ping": op_ping, "classify": op_classify, "referee": op_referee}
+def op_coach(req):
+    if not live_enabled():
+        return {"op": "coach", "tip": None, "reason": "offline"}
+    meta = coach_with_metadata(req["shot"], req.get("confidence"), req.get("dtw_distance"), req["swing"])
+    return {"op": "coach", "tip": meta["tip"], "reason": meta["reason"], "latency_ms": meta["latency_ms"]}
+
+
+OPS = {"ping": op_ping, "coach": op_coach, "classify": op_classify, "referee": op_referee}
 
 
 def respond(payload):

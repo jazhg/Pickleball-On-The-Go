@@ -9,8 +9,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { CONFIG } from '../shared/config.js';
 import { normalizeControllerPose, parseMessage } from '../shared/protocol.js';
 import { parseAnalysis } from '../shared/shot-telemetry.js';
+import { parsePaddleSwing } from '../shared/paddle.js';
 import { Simulation } from './physics.js';
-import { adjudicateRally, classifySwing, validateRulingForApply } from './nemotron-bridge.js';
+import { adjudicateRally, classifySwing, coachSwing, validateRulingForApply } from './nemotron-bridge.js';
 
 // Translate authoritative sim events into fixture-style referee events so the
 // Nemotron referee judges the same shape it was evaluated on.
@@ -156,8 +157,16 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       hub.emit('connection', ws);
     });
   });
+  // The opponent plays only while seat B is empty. A second human takes it over,
+  // and it comes back when they leave, so solo play still rallies.
+  const syncBot = (leaving = null) => {
+    sim.botEnabled = ![...hub.clients].some(client => client !== leaving
+      && client.player === 'B' && client.readyState === WebSocket.OPEN);
+  };
   hub.on('connection', ws => {
     ws.isAlive = true; ws.lastSwing = -Infinity;
+    syncBot();
+    ws.on('close', () => syncBot(ws));
     ws.controllerTokens = CONFIG.network.controllerRateBurst;
     ws.controllerRefillAt = performance.now();
     ws.on('pong', () => { ws.isAlive = true; });
@@ -179,7 +188,10 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         sendToLaptops(pending);
         return;
       }
-      const msg = parseMessage(data);
+      // The phone's own face angle at contact travels with its swing; a plain
+      // swing (keyboard, or motion without orientation) still plays without one.
+      const aimed = parsePaddleSwing(data);
+      const msg = aimed ? aimed.swing : parseMessage(data);
       if (!msg) return;
       if (msg.type === 'controller_pose') {
         if (ws.role !== 'phone') return;
@@ -202,7 +214,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         ws.lastSwing = now;
         const seat = ws.player || 'A';
         const phaseBefore = sim.phase;
-        const accepted = sim.swing(msg, seat);
+        const accepted = sim.swing(msg, seat, aimed?.aim ?? null);
         const horizontal = accepted ? Math.hypot(sim.ball.vx, sim.ball.vz) : 0;
         const shot = {
           type: 'shot', id: nextShotId++, t: msg.t, source: ws.role, accepted,
@@ -224,6 +236,11 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
             lastClassification = { shot: c.shot, target_zone: c.target_zone, confidence: c.confidence };
             sendToLaptops({ t: Date.now(), type: 'classification', shot: c.shot,
               target_zone: c.target_zone, confidence: c.confidence, path: result.path });
+            // Optional coaching tip: fire-and-forget, never awaited by the rally.
+            // The DTW analysis may not have arrived yet; the distance is then null.
+            if (!String(result.reason ?? '').startsWith('bridge_')) coachSwing(c.shot, c.confidence, shot.analysis?.distance ?? null, msg).then((tip) => {
+              if (tip) sendToLaptops({ t: Date.now(), type: 'coach_tip', tip });
+            }).catch(() => {});
           }).catch(() => {});
         }
         console.log(`[${ws.role} ${seat}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
@@ -243,7 +260,6 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   let previous = performance.now(), accumulator = 0;
   const step = 1 / CONFIG.simulation.hz;
   let prevPhase = sim.phase;
-  let botScheduled = false, botTimer = null;
   const onRallyComplete = async () => {
     // Adjudication is async and never blocks the sim; a missing or malformed
     // ruling leaves the score untouched (offline-safe default).
@@ -269,20 +285,8 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     previous = now;
     while (accumulator >= step) { sim.step(step); accumulator -= step; }
     if (sim.phase !== prevPhase) {
-      if (sim.phase === 'rally') botScheduled = false;
-      if (prevPhase === 'rally' && sim.phase === 'reset') {
-        if (botTimer) { clearTimeout(botTimer); botTimer = null; }
-        onRallyComplete();
-      }
+      if (prevPhase === 'rally' && sim.phase === 'reset') onRallyComplete();
       prevPhase = sim.phase;
-    }
-    // Wall bot: return the first in-bounds far-side bounce after ~0.35 s.
-    if (sim.phase === 'rally' && !botScheduled) {
-      const landed = sim.events.some((e) => e.type === 'bounce' && e.in_bounds && e.z < 0);
-      if (landed) {
-        botScheduled = true;
-        botTimer = setTimeout(() => { botTimer = null; sim.botReturn(); }, 350);
-      }
     }
   }, 1000 / CONFIG.simulation.hz);
   const broadcast = setInterval(() => {

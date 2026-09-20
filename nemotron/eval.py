@@ -95,7 +95,7 @@ def evaluate(args):
     lines += ["", "## Classifier", "", f"Dataset: {'human-captured labels' if args.swings else 'synthetic smoke examples, NOT human captures'}; n={len(examples)}. Required 100 prompted human swings: {'provided ' + str(len(examples)) if args.swings else '0/100 supplied'}. Latencies below are measured wall time for the named path; offline latencies are not model/network latencies.", ""]
     classifier_rows, classifier_failures, matrices = [], [], []
     if heuristic_classify:
-        for method in ("Heuristic", "Lightning live" if args.live else "Nano offline fallback"):
+        for method in ("Heuristic", "Lightning live" if args.live else "Offline fallback (no model)"):
             outcomes, latencies, fallback = [], [], 0
             for example in examples:
                 if example["expected_shot"] not in SHOTS:

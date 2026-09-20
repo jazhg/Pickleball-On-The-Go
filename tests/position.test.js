@@ -62,3 +62,29 @@ test('moving during calibration restarts the stand-still capture', () => {
   const tracker = new PositionTracker(); tracker.update(body()); tracker.update(body(0.7));
   assert.equal(tracker.samples.length, 1);
 });
+
+test('the paddle follows the hand in the player own frame, not the camera image', () => {
+  const tracker = new PositionTracker();
+  let now = 1000;
+  for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) tracker.update(body(), now += 67);
+  assert.equal(tracker.activeWrist, 15);
+  const neutral = CONFIG.render.neutralPaddleOffset;
+  const settle = (wrist) => {
+    const fresh = new PositionTracker();
+    let t = 1000;
+    for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) fresh.update(body(), t += 67);
+    for (let i = 0; i < 40; i++) fresh.update(body(0.5, 0.2, 0.65, wrist), t += 67);
+    return fresh.state().wristOffset;
+  };
+  // The camera faces the player, so image-left is the player's own right.
+  const toMyRight = settle({ x: 0.5 - 0.34, y: 0.5, z: 0 });
+  const toMyLeft = settle({ x: 0.5 - 0.10, y: 0.5, z: 0 });
+  assert.ok(toMyRight.x > neutral.x, `hand to the right should move the paddle right, got ${toMyRight.x}`);
+  assert.ok(toMyLeft.x < neutral.x, `hand to the left should move the paddle left, got ${toMyLeft.x}`);
+  // Image y grows downward: a raised hand lifts the paddle.
+  assert.ok(settle({ x: 0.5 - 0.22, y: 0.2, z: 0 }).y > neutral.y, 'raising the hand raises the paddle');
+  // Landmark depth is negative toward the camera; the view looks down -Z, so
+  // reaching out must push the paddle away from the eye.
+  assert.ok(settle({ x: 0.5 - 0.22, y: 0.5, z: -0.4 }).z < neutral.z, 'reaching out pushes the paddle forward');
+  assert.ok(settle({ x: 0.5 - 0.22, y: 0.5, z: 0.4 }).z > neutral.z, 'pulling back brings the paddle in');
+});

@@ -1,0 +1,70 @@
+{
+  "id": "51_multiplayer",
+  "category": "multiplayer",
+  "name": "Opening service: first server faults, immediate side-out",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": false,
+  "game_state": {
+    "score": [
+      0,
+      0
+    ],
+    "serving_team": "A",
+    "server_number": 2,
+    "scoring_mode": "doubles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "volley",
+      "foot_legal": false,
+      "contact_above_waist": false,
+      "upward_motion": true,
+      "paddle_below_wrist": true,
+      "t": 1000
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": true,
+    "player": "A",
+    "rule": "TODO:human-reviewed-citation",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      0,
+      0
+    ],
+    "side_out": true
+  },
+  "expected_rule_key": "serve_foot",
+  "expected_next_server": [
+    "B",
+    1
+  ],
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Opening-service exception: the first side-out of the game hands serve over after one fault (server_number 2 at 0-0). Provisional multiplayer expectation; rule citation is a placeholder. Verify independently."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "drive",
+    "swing": {
+      "t": 1234618,
+      "type": "swing",
+      "peak_g": 3.7,
+      "pitch": 10,
+      "roll": -6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 1.0,
+      "phase": "rally",
+      "court_y": 2.9
+    }
+  }
+}

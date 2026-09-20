@@ -1,5 +1,6 @@
 import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
+import { framePaddlePosition } from '/shared/paddle.js';
 import { setupTracking } from './tracking.js';
 
 // The laptop renders server snapshots. There is deliberately no ball simulation here.
@@ -10,7 +11,7 @@ const ui = Object.fromEntries([
   'phase-description', 'swing-button', 'swing-hint', 'last-shot',
   'last-shot-detail', 'last-ruling', 'shot-count', 'shot-flash', 'transport-note',
   'voice-toggle', 'evidence-panel', 'evidence-rule', 'evidence-events',
-  'evidence-shot', 'analytics-strip',
+  'evidence-shot', 'analytics-strip', 'coach-tip', 'coach-tip-text', 'coach-tip-dismiss',
 ].map((id) => [id, document.getElementById(id)]));
 
 // --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
@@ -61,6 +62,14 @@ function receiveClassification(message) {
   analytics.confN += 1;
   renderAnalytics();
 }
+
+function receiveCoachTip(message) {
+  if (!validMessage(message)) return;
+  ui['coach-tip-text'].textContent = `Coach: ${message.tip}`;
+  ui['coach-tip'].hidden = false;
+}
+
+ui['coach-tip-dismiss'].addEventListener('click', () => { ui['coach-tip'].hidden = true; });
 
 function receiveRulingEvidence(message) {
   if (!validMessage(message)) return;
@@ -181,6 +190,7 @@ function updateControls() {
     ui['phase-description'].textContent = 'No ball is in play. Request one when you’re ready.';
     ui['swing-hint'].textContent = 'Click Spawn ball here or on your phone.';
   } else if (phase === 'ready') {
+    shortBallHint = false;
     ui['phase-title'].textContent = 'Ready when you are';
     ui['phase-description'].textContent = 'The ball is at your paddle. Send it over the net.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
@@ -189,9 +199,13 @@ function updateControls() {
     ui['phase-description'].textContent = 'Follow the flight and watch the far-side bounce.';
     ui['swing-hint'].textContent = 'After this shot, click Spawn ball to play again.';
   } else if (phase === 'reset') {
-    ui['phase-title'].textContent = 'Shot finished';
-    ui['phase-description'].textContent = 'The ball will clear, then you can request another.';
-    ui['swing-hint'].textContent = 'The next ball waits for your button press.';
+    ui['phase-title'].textContent = shortBallHint ? 'Never made it over' : 'Shot finished';
+    ui['phase-description'].textContent = shortBallHint
+      ? 'That swing did not carry the ball to the net.'
+      : 'The ball will clear, then you can request another.';
+    ui['swing-hint'].textContent = shortBallHint
+      ? 'Swing faster, or tilt the paddle face up to lift it over.'
+      : 'The next ball waits for your button press.';
   } else {
     ui['phase-title'].textContent = 'Waiting for the ball';
     ui['phase-description'].textContent = 'Connected to the relay. Waiting for its first snapshot.';
@@ -208,14 +222,31 @@ function isState(message) {
     && message.ball && ['x', 'y', 'z', 'vx', 'vy', 'vz'].every((key) => Number.isFinite(message.ball[key]));
 }
 
+// A rally that never reached the far side was hit too softly or too flat. Say so
+// plainly: that is the whole feel of the game to learn.
+let crossedNet = false;
+let shortBallHint = false;
+
 function receiveState(state) {
   const previousPhase = latestState?.phase;
+  const myTurn = localPlayer && (
+    (state.phase === 'ready' && state.ready_for === localPlayer)
+    || (state.phase === 'rally' && state.last_hitter && state.last_hitter !== localPlayer));
+  court?.showAim?.(myTurn);
+  if (state.last_hitter === localPlayer && latestState?.last_hitter !== localPlayer) court?.playSwing?.();
+  if (state.phase === 'rally') {
+    if (state.ball.z * seatSign < 0) crossedNet = true;
+  } else if (previousPhase === 'rally' && state.phase !== 'rally') {
+    shortBallHint = !crossedNet && latestState?.last_hitter === localPlayer;
+    crossedNet = false;
+  }
   if (state.players && court && typeof court.updateOpponent === 'function') {
     const opponentKey = localPlayer ? Object.keys(state.players).find((key) => key !== localPlayer) : Object.keys(state.players)[0];
     if (opponentKey) court.updateOpponent(state.players[opponentKey]);
   }
   if (state.phase === 'rally' && previousPhase === 'ready') {
     launches += 1;
+    ui['coach-tip'].hidden = true; // a tip belongs to the previous swing
     ui['last-shot'].textContent = 'Classifying…';
     ui['last-shot-detail'].textContent = Date.now() - localSwingAt < 1500
       ? `Synthetic swing · ${CONFIG.swing.synthetic.peak_g.toFixed(1)}g`
@@ -300,6 +331,7 @@ function connect() {
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
     else if (message.type === 'classification') receiveClassification(message);
+    else if (message.type === 'coach_tip') receiveCoachTip(message);
     else if (message.type === 'ruling_evidence') receiveRulingEvidence(message);
   });
   socket.addEventListener('close', () => {
@@ -489,23 +521,49 @@ function createCourt(THREE) {
   // Camera-local first-person paddle. Geometry/materials are created once and the
   // whole assembly inherits court movement and jump height from the camera.
   const paddle = new THREE.Group();
+  const grip = new THREE.Group();
+  grip.rotation.z = CONFIG.render.gripRollDeg * Math.PI / 180;
+  paddle.add(grip);
   const face = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32), new THREE.MeshStandardMaterial({ color: '#dbe86b', roughness: 0.55, metalness: 0.03 }));
   face.rotation.x = Math.PI / 2;
   face.scale.set(0.92, 1, 1.22);
   face.castShadow = true;
-  paddle.add(face);
+  grip.add(face);
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 8, 32), new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7 }));
   rim.scale.y = 1.22;
   rim.castShadow = true;
-  paddle.add(rim);
+  grip.add(rim);
   const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.055), new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9 }));
   handle.position.y = -0.28;
   handle.castShadow = true;
-  paddle.add(handle);
+  grip.add(handle);
+  // Aim pointer along paddle-local -Z: the exact direction the server launches
+  // the ball from this face, so "it goes where I point" is visible before the hit.
+  const aimLength = CONFIG.render.aimLineLength;
+  const aimGeometry = new THREE.CylinderGeometry(0.0045, 0.0045, aimLength, 6);
+  aimGeometry.translate(0, aimLength / 2, 0);
+  const aimMaterial = new THREE.MeshBasicMaterial({ color: '#e7f59a', transparent: true, opacity: 0.42, depthWrite: false });
+  const aimLine = new THREE.Mesh(aimGeometry, aimMaterial);
+  aimLine.rotation.x = -Math.PI / 2;
+  const aimTip = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.06, 10), aimMaterial);
+  aimTip.position.y = aimLength;
+  aimLine.add(aimTip);
+  aimLine.visible = false;
+  paddle.add(aimLine);
+
   const paddleTargetPosition = new THREE.Vector3(CONFIG.render.neutralPaddleOffset.x, CONFIG.render.neutralPaddleOffset.y, CONFIG.render.neutralPaddleOffset.z);
   const paddleTargetQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+  // Smoothed pose, kept apart from the rendered transform so the contact
+  // animation can ride on top without feeding its own offset back in.
+  const paddleBasePosition = paddleTargetPosition.clone();
+  const paddleBaseQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+  const swingSpin = new THREE.Quaternion();
+  const SWING_AXIS = new THREE.Vector3(1, 0.35, 0).normalize();
+  let swingStartedAt = -Infinity;
   paddle.position.copy(paddleTargetPosition);
   camera.add(paddle);
+  function playSwing() { swingStartedAt = performance.now(); }
+  function showAim(visible) { aimLine.visible = Boolean(visible); }
   function updateTracking(state) {
     if (!state?.wristOffset || !Number.isFinite(state.jumpHeight)) return;
     paddleTargetPosition.set(state.wristOffset.x, state.wristOffset.y, Math.min(-0.22, state.wristOffset.z));
@@ -592,8 +650,34 @@ function createCourt(THREE) {
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
-    paddle.position.lerp(paddleTargetPosition, CONFIG.render.paddlePositionAlpha);
-    paddle.quaternion.slerp(paddleTargetQuaternion, CONFIG.render.paddleRotationAlpha);
+    paddleBasePosition.lerp(paddleTargetPosition, CONFIG.render.paddlePositionAlpha);
+    // Track a fast swing one-to-one but stay calm in a resting hand: the further
+    // the paddle has fallen behind the phone, the harder it catches up.
+    const lag = paddleBaseQuaternion.angleTo(paddleTargetQuaternion);
+    paddleBaseQuaternion.slerp(paddleTargetQuaternion, Math.min(
+      CONFIG.render.paddleRotationMaxAlpha,
+      CONFIG.render.paddleRotationAlpha + lag * CONFIG.render.paddleRotationGain,
+    ));
+    // Frame the paddle against the live frustum rather than trusting fixed metres
+    // to land on screen; the tracked hand only nudges it from that resting spot.
+    const frame = CONFIG.render.paddleFrame;
+    const placed = framePaddlePosition({
+      fovDeg: camera.fov, aspect: camera.aspect, depth: paddleBasePosition.z,
+      dx: paddleBasePosition.x - CONFIG.render.neutralPaddleOffset.x,
+      dy: paddleBasePosition.y - CONFIG.render.neutralPaddleOffset.y,
+      rest: frame, limit: frame.limit,
+    });
+    paddle.position.set(placed.x, placed.y, paddleBasePosition.z);
+    paddle.quaternion.copy(paddleBaseQuaternion);
+    // Contact drives the paddle through the ball and back: a half sine, so it
+    // leaves and returns to the live phone pose with no snap at either end.
+    const sinceSwing = performance.now() - swingStartedAt;
+    if (sinceSwing >= 0 && sinceSwing < CONFIG.render.swingMs) {
+      const arc = Math.sin(Math.PI * sinceSwing / CONFIG.render.swingMs);
+      paddle.position.z -= arc * CONFIG.render.swingReach;
+      paddle.position.y += arc * CONFIG.render.swingRise;
+      paddle.quaternion.multiply(swingSpin.setFromAxisAngle(SWING_AXIS, arc * CONFIG.render.swingTwistDeg * Math.PI / 180));
+    }
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
@@ -602,7 +686,7 @@ function createCourt(THREE) {
     showRenderError('The 3D graphics context was interrupted. Reload this page to reconnect the court.');
     updateControls();
   });
-  return { applyState, clearTrail, updateOpponent, updateTracking, updateController };
+  return { applyState, clearTrail, updateOpponent, updateTracking, updateController, playSwing, showAim };
 }
 
 function showRenderError(message) {

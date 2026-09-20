@@ -1,0 +1,93 @@
+{
+  "id": "54_multiplayer",
+  "category": "multiplayer",
+  "name": "Doubles: second server faults, side-out with no score change",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": false,
+  "game_state": {
+    "score": [
+      3,
+      2
+    ],
+    "serving_team": "A",
+    "server_number": 2,
+    "scoring_mode": "doubles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "volley",
+      "foot_legal": true,
+      "contact_above_waist": false,
+      "upward_motion": true,
+      "paddle_below_wrist": true,
+      "t": 1000
+    },
+    {
+      "event": "serve_landing",
+      "player": "B",
+      "correct_service_court": true,
+      "t": 1300
+    },
+    {
+      "event": "hit",
+      "player": "B",
+      "id": "return",
+      "volley": false,
+      "t": 1600
+    },
+    {
+      "event": "bounce",
+      "player": "A",
+      "t": 1900
+    },
+    {
+      "event": "fault",
+      "player": "A",
+      "t": 2200
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": true,
+    "player": "A",
+    "rule": "TODO:human-reviewed-citation",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      3,
+      2
+    ],
+    "side_out": true
+  },
+  "expected_rule_key": "rally_outcome",
+  "expected_next_server": [
+    "B",
+    1
+  ],
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Second-server fault flips serve to the other team as server 1. Provisional multiplayer expectation; rule citation is a placeholder. Verify independently."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "smash",
+    "swing": {
+      "t": 1234621,
+      "type": "swing",
+      "peak_g": 4.8,
+      "pitch": -10,
+      "roll": 6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 1.7,
+      "phase": "rally",
+      "court_y": 2.9
+    }
+  }
+}

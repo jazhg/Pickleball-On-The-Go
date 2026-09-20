@@ -11,7 +11,9 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nemotron.coach import coach_tip
 from nemotron.classifier import classify_with_metadata, heuristic_classify
+from nemotron.baseline import adjudicate
 from nemotron.metrics import referee_metrics
 from nemotron.referee import referee, referee_with_metadata, replay_ruling
 from nemotron.schema import strict_json, validate_classification, validate_ruling
@@ -183,11 +185,56 @@ class GuardrailTests(unittest.TestCase):
     def test_fixture_count_categories_momentum_and_provenance(self):
         from collections import Counter
         fixtures = [json.loads(p.read_text()) for p in (ROOT / "fixtures").glob("*.json")]
-        self.assertEqual(len(fixtures), 50)
+        self.assertEqual(len(fixtures), 60)
         self.assertEqual(Counter(f["category"] for f in fixtures),
-                         {"serve": 10, "nvz": 12, "two_bounce": 10, "scoring": 10, "multi": 8})
+                         {"serve": 10, "nvz": 12, "two_bounce": 10, "scoring": 10, "multi": 8, "multiplayer": 10})
         self.assertEqual(sum(f["momentum_case"] for f in fixtures if f["category"] == "nvz"), 6)
         self.assertTrue(all(f["classifier_example"]["provenance"] == "synthetic_smoke_only" for f in fixtures))
+
+    def test_second_server_fault_is_side_out_without_score_change(self):
+        fixture = json.loads((ROOT / "fixtures/54_multiplayer.json").read_text())
+        result = adjudicate(fixture["events"], fixture["game_state"])
+        self.assertEqual(result["ruling"]["score"], fixture["game_state"]["score"])
+        self.assertTrue(result["ruling"]["side_out"])
+        self.assertEqual((result["next_state"]["serving_team"], result["next_state"]["server_number"]), ("B", 1))
+
+    def test_opening_service_exception_gives_one_server_on_first_side_out(self):
+        fixture = json.loads((ROOT / "fixtures/51_multiplayer.json").read_text())
+        self.assertEqual((fixture["game_state"]["score"], fixture["game_state"]["server_number"]), ([0, 0], 2))
+        result = adjudicate(fixture["events"], fixture["game_state"])
+        self.assertTrue(result["ruling"]["side_out"])
+        self.assertEqual(result["ruling"]["score"], [0, 0])
+        self.assertEqual((result["next_state"]["serving_team"], result["next_state"]["server_number"]), ("B", 1))
+        kept = json.loads((ROOT / "fixtures/52_multiplayer.json").read_text())
+        held = adjudicate(kept["events"], kept["game_state"])
+        self.assertEqual((held["ruling"]["score"], held["ruling"]["side_out"]), ([1, 0], False))
+        self.assertEqual(held["next_state"]["server_number"], 2)
+
+    SWING = {"t": 1, "type": "swing", "peak_g": 3.1, "pitch": 30.0, "roll": 25.0, "yaw_rate": 200, "duration_ms": 300}
+
+    def coach(self, reply, finish="stop", key="TEST_SECRET"):
+        opener = FakeOpener([envelope(reply, finish)])
+        env = {"NVIDIA_API_KEY": key} if key else {}
+        with patch.dict(os.environ, env, clear=not key):
+            tip = coach_tip("drive", .8, 0.4, self.SWING, client=NvidiaClient(self.log_dir, opener=opener))
+        return tip, opener
+
+    def test_coach_returns_short_tip_via_coach_alias(self):
+        tip, opener = self.coach("Try meeting the ball a little earlier and keep the paddle face square.")
+        self.assertEqual(tip, "Try meeting the ball a little earlier and keep the paddle face square.")
+        payload = json.loads(opener.calls[0][0].data)
+        self.assertEqual(payload["model"], "nvidia/nemotron-3.5-lightning-30b-a3b")
+
+    def test_coach_fails_silently_on_bad_replies_and_missing_key(self):
+        self.assertIsNone(self.coach("word " * 21)[0])
+        self.assertIsNone(self.coach('{"tip": "x"}')[0])
+        self.assertIsNone(self.coach("Cut off mid", finish="length")[0])
+        self.assertIsNone(coach_tip("drive", .8, None, self.SWING))  # no key, no client: no network
+
+    def test_coach_swallows_http_errors(self):
+        opener = FakeOpener([HTTPError("u", 500, "err", {}, io.BytesIO(b"{}"))])
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "TEST_SECRET"}):
+            self.assertIsNone(coach_tip("drive", .8, None, self.SWING, client=NvidiaClient(self.log_dir, opener=opener)))
 
 
 if __name__ == "__main__":

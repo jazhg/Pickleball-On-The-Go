@@ -74,3 +74,7 @@ h1 { font: 650 clamp(35px, 3.5vw, 54px)/1.15 'Manrope', sans-serif; letter-spaci
 .evidence-events { margin: 6px 0 2px; padding-left: 18px; font-size: 10px; color: #8b9382; line-height: 1.7; }
 .analytics-details { border-top: 1px solid #e6e9df; padding: 17px 0 4px; }
 .analytics-strip { font-size: 10px !important; color: #8b9382 !important; line-height: 1.65; }
+
+.coach-tip { display: flex; align-items: flex-start; gap: 6px; color: #5f7a3a !important; }
+.coach-tip[hidden] { display: none; }
+.coach-dismiss { border: 0; background: none; color: #99a18f; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; }

@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import {
   adjudicateRally,
   classifySwing,
+  coachSwing,
   validateRulingForApply,
 } from '../server/nemotron-bridge.js';
 import { buildRallyEnvelope } from '../server/index.js';
@@ -17,7 +18,10 @@ const SWING = { t: 123, type: 'swing', peak_g: 3.8, pitch: 14.2, roll: -6.1, yaw
 const HANG = ['python3', '-c', 'import time; time.sleep(30)'];
 
 test('classifier works offline: valid wire shape, heuristic path', async () => {
-  const result = await classifySwing(SWING, { wrist_h: 0.95 });
+  // Spawning Python cannot be relied on inside the 300 ms production deadline while
+  // the rest of the suite runs in parallel. The deadline itself is covered by the
+  // timeout test below; this one is about the offline heuristic path being correct.
+  const result = await classifySwing(SWING, { wrist_h: 0.95 }, { timeoutMs: 15000 });
   assert.equal(result.path, 'heuristic');
   assert.ok(validMessage({ t: Date.now(), type: 'classification', ...result.classification, path: result.path }));
 });
@@ -95,6 +99,9 @@ test('wall bot returns the first far-side bounce and schedules one return only',
 
 test('full relay loop: swing -> classification -> bot rally -> ruling with side-out', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
+  // Pin the opponent's dice: it returns the serve cleanly down the middle, so this
+  // asserts the relay loop rather than whether the bot happened to miss.
+  relay.sim.botRandom = () => 0.5;
   const port = relay.server.address().port;
   const endpoint = `http://127.0.0.1:${port}`;
   try {
@@ -135,4 +142,65 @@ test('full relay loop: swing -> classification -> bot rally -> ruling with side-
     assert.ok(evidence.trigger_events.length >= 3, 'timeline shows the rally sequence');
     laptop.close();
   } finally { await relay.close(); }
+});
+
+test('coach: no key means null, no spawn, no throw', async () => {
+  const saved = { ...process.env };
+  delete process.env.NVIDIA_API_KEY; delete process.env.NEMOTRON_LIVE;
+  try {
+    assert.equal(await coachSwing('drive', 0.5, null, SWING, { command: ['definitely-not-a-command'] }), null);
+  } finally { Object.assign(process.env, saved); }
+});
+
+test('coach: live mode returns the tip; hangs and garbage degrade to null', async () => {
+  const saved = { ...process.env };
+  process.env.NVIDIA_API_KEY = 'TEST_ONLY'; process.env.NEMOTRON_LIVE = '1';
+  try {
+    const ok = ['python3', '-c', 'print(\'{"op":"coach","tip":"Meet the ball earlier."}\')'];
+    assert.equal(await coachSwing('drive', 0.5, 0.3, SWING, { command: ok }), 'Meet the ball earlier.');
+    assert.equal(await coachSwing('drive', 0.5, 0.3, SWING, { command: HANG, timeoutMs: 150 }), null);
+    assert.equal(await coachSwing('drive', 0.5, 0.3, SWING, { command: ['python3', '-c', 'print("x{")'] }), null);
+  } finally {
+    for (const k of ['NVIDIA_API_KEY', 'NEMOTRON_LIVE']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+});
+
+test('coach_tip wire message validates and rejects junk', () => {
+  assert.ok(validMessage({ t: 1, type: 'coach_tip', tip: 'Try a smoother swing.' }));
+  assert.ok(!validMessage({ t: 1, type: 'coach_tip', tip: '' }));
+  assert.ok(!validMessage({ t: 1, type: 'coach_tip', tip: 'x', extra: 1 }));
+});
+
+test('a paddle-aimed swing reaches the sim over the wire and steers the ball', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const port = relay.server.address().port;
+  const open = async (role) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?role=${role}&seat=A`);
+    await once(ws, 'open');
+    return ws;
+  };
+  const yaw = (deg) => { const h = deg * Math.PI / 360; return { qx: 0, qy: Math.sin(h), qz: 0, qw: Math.cos(h) }; };
+  const shotFrom = async (aim) => {
+    const phone = await open('phone');
+    phone.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+    await new Promise((r) => setTimeout(r, 60));
+    const swing = { t: Date.now(), type: 'swing', peak_g: 5, pitch: 0, roll: 0, yaw_rate: 0, duration_ms: 300 };
+    phone.send(JSON.stringify({ type: 'paddle_swing', swing, aim }));
+    // Read states until the ball is travelling, then report its sideways velocity.
+    const deadline = Date.now() + 2000;
+    let vx = 0;
+    while (Date.now() < deadline) {
+      const [data] = await once(phone, 'message');
+      const msg = JSON.parse(String(data));
+      if (msg.type === 'state' && msg.phase === 'rally') { vx = msg.ball.vx; break; }
+    }
+    phone.close();
+    await new Promise((r) => setTimeout(r, 250)); // clear the rally before the next
+    return vx;
+  };
+  try {
+    assert.ok(await shotFrom(yaw(30)) < -0.5, 'aiming left must send the ball left');
+  } finally {
+    await relay.close();
+  }
 });

@@ -1,0 +1,93 @@
+{
+  "id": "56_multiplayer",
+  "category": "multiplayer",
+  "name": "Doubles: first server wins the rally and keeps server number 1",
+  "source": "Hand-authored synthetic scenario; NOT verified against rulebook examples.",
+  "momentum_case": false,
+  "game_state": {
+    "score": [
+      3,
+      2
+    ],
+    "serving_team": "A",
+    "server_number": 1,
+    "scoring_mode": "doubles"
+  },
+  "events": [
+    {
+      "event": "serve",
+      "player": "A",
+      "method": "volley",
+      "foot_legal": true,
+      "contact_above_waist": false,
+      "upward_motion": true,
+      "paddle_below_wrist": true,
+      "t": 1000
+    },
+    {
+      "event": "serve_landing",
+      "player": "B",
+      "correct_service_court": true,
+      "t": 1300
+    },
+    {
+      "event": "hit",
+      "player": "B",
+      "id": "return",
+      "volley": false,
+      "t": 1600
+    },
+    {
+      "event": "bounce",
+      "player": "A",
+      "t": 1900
+    },
+    {
+      "event": "fault",
+      "player": "B",
+      "t": 2200
+    }
+  ],
+  "expected_ruling": {
+    "type": "ruling",
+    "fault": true,
+    "player": "B",
+    "rule": "TODO:human-reviewed-citation",
+    "explanation": "Provisional scenario expectation; two human reviews required.",
+    "score": [
+      4,
+      2
+    ],
+    "side_out": false
+  },
+  "expected_rule_key": "rally_outcome",
+  "expected_next_server": [
+    "A",
+    1
+  ],
+  "review": {
+    "status": "TODO",
+    "reviewers": [],
+    "rulebook_edition": "TODO",
+    "source_page": "TODO",
+    "notes": "Provisional multiplayer expectation; rule citation is a placeholder. Verify independently."
+  },
+  "classifier_example": {
+    "provenance": "synthetic_smoke_only",
+    "expected_shot": "mishit",
+    "swing": {
+      "t": 1234623,
+      "type": "swing",
+      "peak_g": 0.8,
+      "pitch": 0,
+      "roll": 6.1,
+      "yaw_rate": 220,
+      "duration_ms": 310
+    },
+    "pose": {
+      "wrist_h": 1.0,
+      "phase": "rally",
+      "court_y": 2.9
+    }
+  }
+}

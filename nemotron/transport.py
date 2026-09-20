@@ -10,8 +10,14 @@ from urllib import error, request
 from uuid import uuid4
 
 ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODELS = {"nano": "nvidia/nemotron-nano-3-30b-a3b", "super": "nvidia/nemotron-3-super-120b-a12b",
-          "lightning": "nvidia/nemotron-3.5-lightning-30b-a3b"}
+# "nano" and "super" are DEPRECATED: nano returns 410 Gone (model renamed) and super is
+# 404 / not entitled on free-tier keys. Use "lightning", verified on a free key.
+MODELS = {"nano": "nvidia/nemotron-nano-3-30b-a3b",  # deprecated
+          "super": "nvidia/nemotron-3-super-120b-a12b",  # deprecated
+          "lightning": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          # Technique coach reuses the lightning model under its own alias so it can
+          # be retargeted independently of the classifier and referee.
+          "coach": "nvidia/nemotron-3.5-lightning-30b-a3b"}
 DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 

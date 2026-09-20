@@ -65,6 +65,22 @@ export async function classifySwing(swing, pose = {}, opts = {}) {
   return response ?? fallbackClassification(opts.timeoutMs ? 'timeout' : 'unavailable');
 }
 
+// Optional technique tip. Fire-and-forget: resolves to a string or null, never
+// throws, and does not even spawn Python unless live mode is on.
+export async function coachSwing(shot, confidence, dtwDistance, swing, opts = {}) {
+  if (!isLiveMode()) return null;
+  try {
+    const response = await runBridge(
+      { op: 'coach', shot, confidence, dtw_distance: dtwDistance, swing },
+      { timeoutMs: CONFIG.nemotron.coachTimeoutMs, ...opts },
+    );
+    const tip = response?.tip;
+    return typeof tip === 'string' && tip.trim() && tip.length <= 200 ? tip.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function adjudicateRally(events, gameState, opts = {}) {
   return runBridge(
     { op: 'referee', events, game_state: gameState },
