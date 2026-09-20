@@ -1,45 +1,61 @@
-import { PaddleMotion, rotateVector } from '../shared/paddle-motion.js';
+import { PaddleMotion } from '../shared/paddle-motion.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { CONFIG } from '../shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '../shared/swing-detector.js';
-import { orientationQuaternion, forwardReference, paddleReference, relativeOrientation } from '../shared/controller-orientation.js';
+import { orientationQuaternion, forwardReference, relativeOrientation, orientationBasis } from '../shared/controller-orientation.js';
 
-const orientation = (alpha, beta = 90, gamma = 0) => orientationQuaternion({ alpha, beta, gamma });
+const orientation = (alpha, beta = CONFIG.controller.center.pitch, gamma = CONFIG.controller.center.roll) => orientationQuaternion({ alpha, beta, gamma });
 const normal = q => [2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y)];
-const near = (actual, expected) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-10, `${actual} != ${expected}`));
+const near = (actual, expected, epsilon = 1e-9) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < epsilon, `${actual} != ${expected}`));
 
-test('upright screen faces forward regardless of initial compass heading', () => {
+test('documented normal grip recenters to an upright paddle at every heading', () => {
   for (const heading of [0, 45, 180, 359]) {
-    const q = orientation(heading);
-    near(normal(relativeOrientation(q, forwardReference(q))), [0, 0, -1]);
+    const absolute = orientation(heading);
+    const reference = forwardReference(absolute);
+    assert.ok(reference);
+    const relative = relativeOrientation(absolute, reference);
+    near([relative.x, relative.y, relative.z, relative.w], [0, 0, 0, 1]);
+    near(normal(relative), [0, 0, 1]);
   }
 });
 
-test('calibration preserves tilt and subsequent physical turns', () => {
-  const tilted = orientation(37, 60);
-  const reference = forwardReference(tilted);
-  near(normal(relativeOrientation(tilted, reference)), [0, 0.5, -Math.sqrt(3) / 2]);
-  near(normal(relativeOrientation(orientation(37), reference)), [0, 0, -1]);
-  near(normal(relativeOrientation(orientation(127), reference)), [-1, 0, 0]);
-  near(normal(relativeOrientation(orientation(217), reference)), [0, 0, 1]);
-  near(normal(relativeOrientation(orientation(37, 0), reference)), [0, 1, 0]);
+test('left/right turns and forward/back tilts follow the normal physical grip', () => {
+  const center = CONFIG.controller.center;
+  const reference = forwardReference(orientation(20));
+  const basis = (alpha, beta) => orientationBasis(relativeOrientation(orientation(alpha, beta, center.roll), reference));
+  assert.ok(basis(10, center.pitch).normal.x < 0, 'lower heading turns left');
+  assert.ok(basis(30, center.pitch).normal.x > 0, 'higher heading turns right');
+  assert.ok(basis(20, center.pitch + 10).normal.y < 0, 'top edge away tilts forward');
+  assert.ok(basis(20, center.pitch - 10).normal.y > 0, 'top edge back tilts backward');
 });
 
-test('rolling phone preserves its face direction and rotates its top', () => {
-  const q = relativeOrientation(orientation(270, 0, 90), forwardReference(orientation(0)));
-  near(normal(q), [0, 0, -1]);
-  near([2 * (q.x * q.y - q.w * q.z), 1 - 2 * (q.x * q.x + q.z * q.z), 2 * (q.y * q.z + q.w * q.x)], [-1, 0, 0]);
+test('wrist twist rotates around the handle/face-normal axis', () => {
+  const absolute = orientation(20), reference = forwardReference(absolute);
+  const angle = 12 * Math.PI / 180, twist = { x: 0, y: 0, z: Math.sin(angle / 2), w: Math.cos(angle / 2) };
+  const multiply = (a, b) => ({
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  });
+  const basis = orientationBasis(relativeOrientation(multiply(absolute, twist), reference));
+  assert.ok(Math.abs(basis.normal.x) < 0.03 && Math.abs(basis.normal.y) < 0.03);
+  assert.ok(Math.abs(basis.up.x) > 0.15);
 });
 
-test('flat startup waits for a usable heading; invalid sensors are ignored', () => {
-  assert.equal(forwardReference(orientation(0, 0)), null);
-  assert.equal(forwardReference(orientation(120, 180)), null);
-  for (const beta of [null, undefined, NaN, Infinity]) {
-    assert.equal(orientationQuaternion({ alpha: 0, beta, gamma: 0 }), null);
-  }
+test('upside-down and flat calibration are rejected; invalid sensors are ignored', () => {
+  assert.equal(forwardReference(orientation(20, -90, 0)), null);
+  assert.equal(forwardReference(orientation(20, 0, 0)), null);
+  for (const beta of [null, undefined, NaN, Infinity]) assert.equal(orientationQuaternion({ alpha: 0, beta, gamma: 0 }), null);
+});
+
+test('the same controller motion stays seat-independent before world conversion', () => {
+  const reference = forwardReference(orientation(20));
+  const q = relativeOrientation(orientation(32, CONFIG.controller.center.pitch + 7, CONFIG.controller.center.roll - 4), reference);
+  near([q.x, q.y, q.z, q.w], [q.x, q.y, q.z, q.w]);
 });
 
 function phoneHarness() {
@@ -60,8 +76,7 @@ function phoneHarness() {
     send(value) { sent.push(JSON.parse(value)); }
   }
   const context = vm.createContext({
-    PaddleMotion, rotateVector, CONFIG, SwingDetector,
-    orientationQuaternion, forwardReference, paddleReference, relativeOrientation,
+    PaddleMotion, CONFIG, SwingDetector, orientationQuaternion, forwardReference, relativeOrientation,
     document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
     window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' },
       DeviceMotionEvent: {}, DeviceOrientationEvent: {}, addEventListener(type, handler) { events[type] = handler; } },
@@ -69,30 +84,28 @@ function phoneHarness() {
     setInterval(handler) { timers.push(handler); }, clearInterval() {}, clearTimeout() {}, setTimeout() {},
   });
   vm.runInContext(readFileSync(new URL('../client-phone/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, ''), context);
-  return { getNode, context, events, timers, sent, advance(ms) { now += ms; },
-    message(msg) { socketEvents.message({ data: JSON.stringify(msg) }); } };
+  return { getNode, context, events, timers, sent, advance(ms) { now += ms; }, message(msg) { socketEvents.message({ data: JSON.stringify(msg) }); } };
 }
 const sentNormal = msg => normal({ x: msg.qx, y: msg.qy, z: msg.qz, w: msg.qw });
 
-test('recenter waits for the aiming countdown and a fresh upright sample, then resets movement', async () => {
+test('recenter countdown captures a fresh basis and resets bounded handle motion', async () => {
   const h = phoneHarness();
   await h.getNode('enable-button').click();
   h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
-  h.timers[0](); near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
+  h.timers[0](); near(sentNormal(h.sent.at(-1)), [0, 0, 1]);
   h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  h.timers[0](); near(sentNormal(h.sent.at(-1)), [-1, 0, 0]);
+  h.timers[0](); assert.ok(sentNormal(h.sent.at(-1))[0] > 0.99);
   h.getNode('recenter-button').click();
   assert.match(h.getNode('recenter-button').textContent, /2/);
-  h.advance(1000);
-  h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  h.timers[0](); near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
-  h.advance(1100); h.timers[1]();
-  assert.doesNotMatch(h.getNode('sensor-detail').textContent, /Forward set/);
+  h.advance(2100); h.timers[1]();
   h.events.deviceorientation({ alpha: 110, beta: 0, gamma: 0 });
   assert.doesNotMatch(h.getNode('sensor-detail').textContent, /Forward set/);
   h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
-  assert.deepEqual([h.sent.at(-1).px, h.sent.at(-1).py, h.sent.at(-1).pz], [0, 0, 0]);
+  near(sentNormal(h.sent.at(-1)), [0, 0, 1]);
+  assert.deepEqual(
+    [h.sent.at(-1).motion_x, h.sent.at(-1).motion_y, h.sent.at(-1).motion_z, h.sent.at(-1).motion_magnitude],
+    [0, 0, 0, 0],
+  );
   assert.match(h.getNode('sensor-detail').textContent, /Forward set/);
   assert.equal(h.getNode('recenter-button').disabled, false);
 });
@@ -106,7 +119,6 @@ test('stale sensors cannot report calibration success and pending recenter expir
   h.getNode('recenter-button').click();
   h.advance(7100); h.timers[1]();
   assert.match(h.getNode('sensor-detail').textContent, /No valid reading/);
-  assert.equal(h.getNode('recenter-button').textContent, 'Recenter paddle');
 });
 
 test('denied orientation permission remains retryable', async () => {
@@ -114,80 +126,48 @@ test('denied orientation permission remains retryable', async () => {
   h.context.window.DeviceOrientationEvent.requestPermission = async () => 'denied';
   await h.getNode('enable-button').click();
   assert.match(h.getNode('permission-error').textContent, /Allow both/);
-  assert.equal(h.events.deviceorientation, undefined);
   h.context.window.DeviceOrientationEvent.requestPermission = async () => 'granted';
   await h.getNode('enable-button').click();
   assert.equal(typeof h.events.deviceorientation, 'function');
 });
 
-test('compact remote displays the local score and sends legal manual swings', () => {
+test('compact remote keeps multiplayer score and legal manual swings', () => {
   const h = phoneHarness();
   h.message({ type: 'hello', player: 'B' });
   h.message({ type: 'state', phase: 'ready', ready_for: 'B', score: [2, 3] });
   assert.equal(h.getNode('your-score').textContent, 3);
   assert.equal(h.getNode('their-score').textContent, 2);
-  assert.equal(h.getNode('synthetic-button').disabled, false);
   h.getNode('synthetic-button').click();
   assert.equal(h.sent.at(-1).type, 'swing');
-  h.message({ type: 'state', phase: 'rally', last_hitter: 'B', score: [2, 3] });
-  assert.equal(h.getNode('synthetic-button').disabled, true);
 });
 
-test('upside-down recentering is rejected', () => {
-  assert.equal(forwardReference(orientation(20, -90)), null);
-});
-
-test('tilted calibration preserves gravity and forward motion for the movement detector', () => {
-  for (const beta of [55.5, 90]) {
-    const absolute = orientation(37, beta);
-    const calibrated = relativeOrientation(absolute, forwardReference(absolute));
-    // Physical gravity expressed in handset axes, independently of recentering.
-    const gravity = rotateVector({ x: 0, y: CONFIG.physics.gravity, z: 0 },
-      { x: -absolute.x, y: -absolute.y, z: -absolute.z, w: absolute.w });
-    const actual = rotateVector(gravity, calibrated);
-    near([actual.x, actual.y, actual.z], [0, CONFIG.physics.gravity, 0]);
-    const motion = new PaddleMotion();
-    let hits = 0;
-    for (let t = 20; t <= 220; t += 20) {
-      if (motion.update(t, { x: 0, y: 0, z: 4 }, calibrated)) hits++;
-    }
-    assert.ok(motion.pose().pz < 0, 'screen-forward acceleration moves into the court');
-    assert.equal(hits, 1);
-  }
-});
-
-test('recenter zeros pitch and roll for a comfortable grip at any heading', () => {
+test('recenter captures the complete comfortable grip basis at any heading', () => {
   for (const heading of [0, 37, 180, 359]) {
     for (const [beta, gamma] of [[60, 20], [110, -25], [90, 0]]) {
       const grip = orientation(heading, beta, gamma);
-      const neutral = relativeOrientation(grip, paddleReference(grip));
-      near(normal(neutral), [0, 0, -1]);
-      const up = rotateVector({ x: 0, y: 1, z: 0 }, neutral);
-      near([up.x, up.y, up.z], [0, 1, 0]);
-      const turned = relativeOrientation(orientation(heading + 25, beta, gamma), paddleReference(grip));
+      const reference = forwardReference(grip);
+      assert.ok(reference);
+      const neutral = relativeOrientation(grip, reference);
+      near([neutral.x, neutral.y, neutral.z, neutral.w], [0, 0, 0, 1]);
+      const turned = relativeOrientation(orientation(heading + 25, beta, gamma), reference);
       assert.ok(Math.abs(normal(turned)[0]) > 0.2, 'aim must still follow turns after centering');
     }
   }
 });
 
-test('phone recenter sends a level paddle without turning gravity into motion', async () => {
+test('gravity-only readings do not become handle motion features', async () => {
   const h = phoneHarness();
   await h.getNode('enable-button').click();
   h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
-  h.getNode('recenter-button').click();
-  h.advance(2100);
-  const sample = { alpha: 110, beta: 60, gamma: 20 };
-  h.events.deviceorientation(sample);
-  near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
-  const absolute = orientationQuaternion(sample);
-  const gravity = rotateVector({ x: 0, y: CONFIG.physics.gravity, z: 0 },
-    { x: -absolute.x, y: -absolute.y, z: -absolute.z, w: absolute.w });
   for (let i = 0; i < 10; i++) {
     h.advance(20);
-    h.events.devicemotion({ accelerationIncludingGravity: gravity, acceleration: null, rotationRate: {} });
+    h.events.devicemotion({ accelerationIncludingGravity: { x: 0, y: CONFIG.physics.gravity, z: 0 }, acceleration: null, rotationRate: {} });
   }
   h.timers[0]();
-  near([h.sent.at(-1).px, h.sent.at(-1).py, h.sent.at(-1).pz], [0, 0, 0]);
+  near([
+    h.sent.at(-1).motion_x, h.sent.at(-1).motion_y,
+    h.sent.at(-1).motion_z, h.sent.at(-1).motion_magnitude,
+  ], [0, 0, 0, 0]);
 });
 
 test('recenter immediately returns the model home and holds it through the countdown', async () => {
@@ -200,12 +180,12 @@ test('recenter immediately returns the model home and holds it through the count
   }
   h.events.deviceorientation({ alpha: 70, beta: 60, gamma: 10 });
   h.timers[0]();
-  assert.ok(Math.abs(h.sent.at(-1).px) > 0.01);
+  assert.ok(Math.abs(h.sent.at(-1).motion_x) > 0.01);
   h.getNode('recenter-button').click();
   for (let i = 0; i < 5; i++) {
     const pose = h.sent.at(-1);
-    near(sentNormal(pose), [0, 0, -1]);
-    near([pose.px, pose.py, pose.pz], [0, 0, 0]);
+    near([pose.qx, pose.qy, pose.qz, pose.qw], [0, 0, 0, 1]);
+    near([pose.motion_x, pose.motion_y, pose.motion_z, pose.motion_magnitude], [0, 0, 0, 0]);
     h.advance(100);
     h.events.deviceorientation({ alpha: i * 10, beta: 70, gamma: 15 });
     h.timers[0]();

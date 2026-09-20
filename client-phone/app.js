@@ -1,5 +1,5 @@
-import { PaddleMotion, rotateVector } from '/shared/paddle-motion.js';
-import { orientationQuaternion, forwardReference, paddleReference, relativeOrientation } from '/shared/controller-orientation.js';
+import { PaddleMotion } from '/shared/paddle-motion.js';
+import { orientationQuaternion, forwardReference, relativeOrientation } from '/shared/controller-orientation.js';
 import { CONFIG } from '/shared/config.js';
 import { SwingDetector } from '/shared/swing-detector.js';
 
@@ -25,7 +25,6 @@ let lastHitter = null;
 let latestOrientation = null;
 let latestOrientationAt = -Infinity;
 let neutralOrientation = null;
-let neutralPaddleOrientation = null;
 let controllerTimer = null;
 let pendingRecenter = null;
 let enablingMotion = false;
@@ -199,7 +198,6 @@ function onOrientation(event) {
     const reference = forwardReference(q);
     if (reference) {
       neutralOrientation = reference;
-      neutralPaddleOrientation = paddleReference(q);
       paddleMotion.reset(); detector.reset(); lastMotionSwingAt = latestOrientationAt;
       pendingRecenter = null;
       ui.recenter.textContent = 'Recenter paddle';
@@ -208,7 +206,6 @@ function onOrientation(event) {
     }
   } else if (!neutralOrientation) {
     neutralOrientation = forwardReference(q);
-    neutralPaddleOrientation = paddleReference(q);
     if (neutralOrientation) ui.sensorDetail.textContent = 'Motion ready. Recenter to set your forward direction.';
   }
   updateMotionStatus();
@@ -218,15 +215,17 @@ function sendControllerPose() {
     // Reset the model immediately and hold it at home during the countdown.
     // Repeat with the pose stream so relay throttling cannot lose the reset.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
-      t: Date.now(), type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0,
-      px: 0, py: 0, pz: 0,
+      t: Date.now(), type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1,
+      ...paddleMotion.pose(),
     }));
     return;
   }
   if (!latestOrientation || !neutralOrientation || socket?.readyState !== WebSocket.OPEN) return;
   if (performance.now() - latestOrientationAt > CONFIG.controller.poseTimeoutMs) return;
-  const q = relativeOrientation(latestOrientation, neutralPaddleOrientation);
+  const q = relativeOrientation(latestOrientation, neutralOrientation);
   if (!q) return;
+  // Orientation rotates around the handle. Motion fields are transient gesture
+  // features; the laptop never treats acceleration as an absolute position.
   socket.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: q.x, qy: q.y, qz: q.z, qw: q.w, ...paddleMotion.pose() }));
 }
 
@@ -239,12 +238,10 @@ function onMotion(event) {
   let movementSwing = null;
   if (latestOrientation && neutralOrientation && now - latestOrientationAt <= CONFIG.controller.poseTimeoutMs) {
     const q = relativeOrientation(latestOrientation, neutralOrientation);
-    let linear = event.acceleration;
-    if (!linear || !['x', 'y', 'z'].every(axis => Number.isFinite(linear[axis]))) {
-      const gravity = rotateVector({ x: 0, y: CONFIG.physics.gravity, z: 0 }, { x: -q.x, y: -q.y, z: -q.z, w: q.w });
-      linear = { x: raw.x - gravity.x, y: raw.y - gravity.y, z: raw.z - gravity.z };
+    const linear = event.acceleration;
+    if (linear && ['x', 'y', 'z'].every(axis => Number.isFinite(linear[axis]))) {
+      movementSwing = paddleMotion.update(now, linear, q, event.rotationRate || {});
     }
-    movementSwing = paddleMotion.update(now, linear, q);
   }
   if ((movementSwing || swing) && now - lastMotionSwingAt >= 350) {
     if (sendSwing(movementSwing || swing, false)) lastMotionSwingAt = now;

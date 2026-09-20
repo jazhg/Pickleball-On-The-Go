@@ -6,32 +6,35 @@ const visible = (landmarks, index, threshold) => Number.isFinite(landmarks?.[ind
   && Number.isFinite(landmarks[index].y) && (landmarks[index].visibility ?? 0) >= threshold;
 
 // Monocular body tracking. Public pose output deliberately retains the frozen
-// wire schema; wristOffset, shoulderOffset, and jumpHeight are render-only.
+// wire schema; the shoulder/elbow/wrist chain and jumpHeight are render-only.
 export class PositionTracker {
   constructor(config = CONFIG) { this.config = config; this.recenter(); }
   recenter() {
     this.samples = [];
     this.reference = null;
-    this.activeWrist = null;
+    this.activeWrist = this.config.tracking.paddleWrist;
     this.lastPositionAt = null;
     this.position = { x: this.config.player.x, z: this.config.player.homeDepth };
     this.wristOffset = { ...this.config.tracking.neutralWristOffset };
-    this.shoulderOffset = { x: 0, y: -0.12, z: -0.4 };
+    this.shoulderOffset = { x: this.config.tracking.shoulderMeters / 2, y: -0.12, z: -0.4 };
+    this.elbowOffset = { ...this.config.tracking.neutralElbowOffset };
     this.wristVelocity = { x: 0, y: 0, z: 0 };
     this.wristSamples = [];
     this.filteredWrist = null;
     this.lastRawWrist = null;
     this.lastWristAt = -Infinity;
     this.lastDynamicsAt = null;
-    this.swing = { active: false, startX: 0, direction: 0, progress: 0, lastMovingAt: -Infinity };
+    this.trackingPresent = false;
+    this.wristConfidence = 0;
     this.jumpHeight = 0;
     this.jumpFrames = 0;
   }
   state() {
     return {
       position: { ...this.position }, wristOffset: { ...this.wristOffset },
-      shoulderOffset: { ...this.shoulderOffset }, jumpHeight: this.jumpHeight,
-      activeWrist: this.activeWrist, swingProgress: this.swing.progress,
+      shoulderOffset: { ...this.shoulderOffset }, elbowOffset: { ...this.elbowOffset }, jumpHeight: this.jumpHeight,
+      activeWrist: this.activeWrist, trackingPresent: this.trackingPresent,
+      wristConfidence: this.wristConfidence,
     };
   }
   update(landmarks, t = Date.now()) {
@@ -58,29 +61,29 @@ export class PositionTracker {
       this.samples.push({ shoulderX, shoulderY, shoulderWidth, wrists });
       if (this.samples.length < c.calibrationFrames) return null;
       const trackedFor = arrayIndex => this.samples.map(sample => ({ sample, wrist: sample.wrists[arrayIndex] })).filter(entry => entry.wrist);
-      const scoreWrist = arrayIndex => {
-        const tracked = trackedFor(arrayIndex);
-        if (!tracked.length) return -Infinity;
-        const movement = Math.max(...tracked.map(e => e.wrist.x)) - Math.min(...tracked.map(e => e.wrist.x));
-        return tracked.length / this.samples.length * 2 + mean(tracked.map(e => e.wrist.visibility)) + movement;
+      const normalizedReference = index => {
+        const tracked = trackedFor(index === 15 ? 0 : 1);
+        const shoulderSign = index === 15 ? -1 : 1;
+        return tracked.length ? {
+          x: mean(tracked.map(e => (e.wrist.x - (e.sample.shoulderX + shoulderSign * e.sample.shoulderWidth / 2)) / e.sample.shoulderWidth)),
+          y: mean(tracked.map(e => (e.sample.shoulderY - e.wrist.y) / e.sample.shoulderWidth)),
+        } : null;
       };
-      this.activeWrist = scoreWrist(0) >= scoreWrist(1) ? 15 : 16;
-      const tracked = trackedFor(this.activeWrist === 15 ? 0 : 1);
-      const shoulderIndex = this.activeWrist === 15 ? 11 : 12;
       this.reference = {
         shoulderX: mean(this.samples.map(s => s.shoulderX)), shoulderY: mean(this.samples.map(s => s.shoulderY)),
         shoulderWidth: mean(this.samples.map(s => s.shoulderWidth)),
-        wrist: tracked.length ? {
-          x: mean(tracked.map(e => (e.wrist.x - (e.sample.shoulderX + (shoulderIndex === 11 ? -e.sample.shoulderWidth / 2 : e.sample.shoulderWidth / 2))) / e.sample.shoulderWidth)),
-          y: mean(tracked.map(e => (e.sample.shoulderY - e.wrist.y) / e.sample.shoulderWidth)),
-        } : null,
+        wrists: { 15: normalizedReference(15), 16: normalizedReference(16) },
       };
-      // The camera-local active shoulder is mirrored with the selfie image.
-      this.shoulderOffset.x = this.activeWrist === 15 ? this.config.tracking.shoulderMeters / 2 : -this.config.tracking.shoulderMeters / 2;
+      this.reference.wrist = this.reference.wrists[this.activeWrist];
+      const trackedShoulder = landmarks[this.activeWrist === 15 ? 11 : 12];
+      this.reference.shoulderLift = (shoulderY - trackedShoulder.y) / shoulderWidth;
+      // The first-person arm is permanently anchored on the visible right side.
+      this.shoulderOffset.x = this.config.tracking.shoulderMeters / 2;
     }
 
     const rawX = clamp((this.reference.shoulderX - shoulderX) / shoulderWidth * c.shoulderMeters * c.lateralGain, -this.config.court.width / 2 + c.edgeMargin, this.config.court.width / 2 - c.edgeMargin);
-    const rawZ = clamp(this.config.player.homeDepth + c.referenceDistance * (this.reference.shoulderWidth / shoulderWidth - 1), c.minDepth, c.maxDepth);
+    const depthDelta = c.referenceDistance * c.depthGain * (this.reference.shoulderWidth / shoulderWidth - 1);
+    const rawZ = clamp(this.config.player.homeDepth + depthDelta, c.minDepth, c.maxDepth);
     const elapsed = this.lastPositionAt === null || t <= this.lastPositionAt ? 1 / this.config.simulation.poseHz : (t - this.lastPositionAt) / 1000;
     const dt = clamp(elapsed, 1 / 120, 0.1);
     this.lastPositionAt = t;
@@ -101,37 +104,43 @@ export class PositionTracker {
     if (!this.reference?.wrist || !visible(landmarks, this.activeWrist, c.wristVisibility)) { this.#wristLost(t); return; }
     const wrist = landmarks[this.activeWrist];
     const shoulder = landmarks[this.activeWrist === 15 ? 11 : 12];
+    const shoulderLift = (shoulderY - shoulder.y) / shoulderWidth - (this.reference.shoulderLift || 0);
+    this.shoulderOffset.y = -0.12 + clamp(shoulderLift * c.shoulderMeters, -0.14, 0.14);
+    const elbowIndex = this.activeWrist === 15 ? 13 : 14;
+    if (visible(landmarks, elbowIndex, c.wristVisibility)) {
+      const elbow = landmarks[elbowIndex];
+      const elbowTarget = {
+        x: this.shoulderOffset.x - (elbow.x - shoulder.x) / shoulderWidth * c.shoulderMeters,
+        y: this.shoulderOffset.y + (shoulder.y - elbow.y) / shoulderWidth * c.shoulderMeters,
+        // Monocular depth is unreliable, but the observed x/y defines the bend
+        // plane while this conservative depth keeps the elbow anatomically near.
+        z: this.shoulderOffset.z - 0.12,
+      };
+      for (const axis of ['x', 'y', 'z']) this.elbowOffset[axis] += c.elbowFilterAlpha * (elbowTarget[axis] - this.elbowOffset[axis]);
+    }
     const raw = { x: (wrist.x - shoulder.x) / shoulderWidth, y: (shoulderY - wrist.y) / shoulderWidth };
     if (this.lastRawWrist && Math.hypot(raw.x - this.lastRawWrist.x, raw.y - this.lastRawWrist.y) > c.wristSampleMaxJump) {
       this.#wristLost(t); return;
     }
     this.lastRawWrist = raw;
+    this.trackingPresent = true;
+    this.wristConfidence = clamp(wrist.visibility ?? 0, 0, 1);
     this.wristSamples.push(raw);
     if (this.wristSamples.length > c.wristMedianSamples) this.wristSamples.shift();
     const stable = { x: median(this.wristSamples.map(v => v.x)), y: median(this.wristSamples.map(v => v.y)) };
     const previous = this.filteredWrist || stable;
     const dt = clamp((t - (this.lastWristAt > 0 ? this.lastWristAt : t - 67)) / 1000, 1 / 120, 0.15);
-    this.filteredWrist = {
-      x: previous.x + c.wristFilterAlpha * (stable.x - previous.x),
-      y: previous.y + c.wristFilterAlpha * (stable.y - previous.y),
-    };
-    const lateralVelocity = (this.filteredWrist.x - previous.x) / dt;
-    if (!this.swing.active && Math.abs(lateralVelocity) >= c.swingStartVelocity) {
-      this.swing = { active: true, startX: previous.x, direction: Math.sign(lateralVelocity), progress: 0, lastMovingAt: t };
-    }
-    if (this.swing.active) {
-      const travel = (this.filteredWrist.x - this.swing.startX) * this.swing.direction;
-      this.swing.progress = Math.max(this.swing.progress, clamp(travel / c.swingTravel, 0, 1));
-      if (Math.abs(lateralVelocity) >= c.swingStartVelocity * 0.35) this.swing.lastMovingAt = t;
-      if (t - this.swing.lastMovingAt > c.swingIdleMs) this.swing.active = false;
-    }
+    const stableSpeed = Math.hypot(stable.x - previous.x, stable.y - previous.y) / dt;
+    const response = clamp(stableSpeed / c.wristResponsiveSpeed, 0, 1);
+    const alpha = c.wristFilterAlpha + (c.wristMovingAlpha - c.wristFilterAlpha) * response;
+    this.filteredWrist = { x: previous.x + alpha * (stable.x - previous.x), y: previous.y + alpha * (stable.y - previous.y) };
     const neutral = this.config.tracking.neutralWristOffset;
     const target = {
       x: neutral.x - (this.filteredWrist.x - this.reference.wrist.x) * c.shoulderMeters * c.wristLateralGain,
       y: neutral.y + (this.filteredWrist.y - this.reference.wrist.y) * c.shoulderMeters * c.wristVerticalGain,
-      // Monocular wrist Z is intentionally ignored. Lateral swing progress
-      // generates a close -> far -> close reach curve.
-      z: neutral.z + c.swingCloseBias - c.swingArcDepth * Math.sin(Math.PI * this.swing.progress),
+      // Monocular wrist Z is intentionally ignored. Procedural depth belongs
+      // to ArmController, the sole owner of the final handle endpoint.
+      z: neutral.z,
     };
     this.#constrainToShoulder(target);
     this.#stepWrist(target, t);
@@ -157,18 +166,20 @@ export class PositionTracker {
     const accelerationStep = Math.hypot(velocityDelta.x, velocityDelta.y, velocityDelta.z);
     const accelerationScale = accelerationStep > 0 ? Math.min(1, c.wristMaxAcceleration * dt / accelerationStep) : 0;
     for (const axis of axes) this.wristVelocity[axis] += velocityDelta[axis] * accelerationScale;
-    const stepLength = Math.hypot(this.wristVelocity.x, this.wristVelocity.y, this.wristVelocity.z) * dt;
-    if (distance > 0 && stepLength >= distance) {
-      for (const axis of axes) { this.wristOffset[axis] = target[axis]; this.wristVelocity[axis] = 0; }
-    } else {
-      for (const axis of axes) this.wristOffset[axis] += this.wristVelocity[axis] * dt;
-    }
+    // Do not snap to the target when a frame would cross it. The bounded
+    // acceleration naturally brakes and settles without a visible velocity
+    // discontinuity at the ends of the arc.
+    for (const axis of axes) this.wristOffset[axis] += this.wristVelocity[axis] * dt;
+    // This stage is a 2D monocular observation. Keeping depth exactly neutral
+    // prevents filter coupling from becoming a second procedural trajectory.
+    this.wristOffset.z = this.config.tracking.neutralWristOffset.z;
+    this.wristVelocity.z = 0;
     this.lastDynamicsAt = t;
   }
   #wristLost(t) {
+    this.trackingPresent = false;
+    this.wristConfidence = 0;
     if (t - this.lastWristAt <= this.config.tracking.wristLossTimeoutMs) return;
-    this.swing.active = false;
-    this.swing.progress += this.config.tracking.wristReturnAlpha * (0 - this.swing.progress);
     this.#stepWrist({ ...this.config.tracking.neutralWristOffset }, t);
   }
   #updateJump(shoulderY, shoulderWidth) {

@@ -15,40 +15,49 @@ export function rotateVector(v, q) {
 export function paddleCenter(position, player = 'A', motion = {}, config = CONFIG) {
   const sign = player === 'B' ? -1 : 1;
   const neutral = config.render.neutralPaddleOffset;
-  return { x: position.x + sign * (neutral.x + (motion.px || 0)),
-    y: config.render.eyeHeight + neutral.y + (motion.py || 0),
-    z: position.z + sign * (neutral.z + (motion.pz || 0)) };
+  return { x: position.x + sign * neutral.x,
+    y: config.render.eyeHeight + neutral.y,
+    z: position.z + sign * neutral.z };
 }
 
-// Short, damped inertial motion, not absolute positional tracking. Gravity-free
-// acceleration is rotated into the calibrated court view before integration.
+// Extracts short-lived, camera-local gesture features for contact detection.
+// Acceleration is never integrated into or applied to the visible handle position.
 export class PaddleMotion {
-  constructor() { this.reset(); }
+  constructor(config = CONFIG) { this.config = config; this.reset(); }
   reset() {
-    this.offset = { x: 0, y: 0, z: 0 }; this.velocity = { x: 0, y: 0, z: 0 };
+    this.filteredAcceleration = { x: 0, y: 0, z: 0 };
+    this.magnitude = 0; this.angularSpeed = 0;
     this.lastT = null; this.activeSince = null; this.lastSwing = -Infinity; this.peak = 0;
   }
-  update(t, acceleration, q) {
+  update(t, acceleration, q, rotationRate = {}) {
     if (!Number.isFinite(t) || !q || !axes.every(a => Number.isFinite(acceleration?.[a]))) return null;
     const elapsed = this.lastT === null ? 0 : (t - this.lastT) / 1000;
     if (elapsed < 0) return null;
     if (elapsed > 0.25) this.reset();
     this.lastT = t;
-    const dt = Math.min(elapsed, 0.04);
-    const a = rotateVector(acceleration, q);
-    const magnitude = Math.hypot(a.x, a.y, a.z);
-    if (magnitude > 0.6) {
-      this.activeSince ??= t;
-      this.peak = Math.max(this.peak, magnitude);
-    } else if (magnitude < 0.25) { this.activeSince = null; this.peak = 0; }
+    const phone = rotateVector(acceleration, q);
+    // Fixed phone-to-camera basis for the documented grip. This is a frame
+    // conversion, not a platform-specific sensor correction.
+    const a = { x: -phone.x, y: phone.y, z: -phone.z };
+    const c = this.config.controller.motionFeatures;
+    const rawMagnitude = Math.hypot(a.x, a.y, a.z);
+    const alpha = rawMagnitude >= c.activeAcceleration ? c.accelerationAlpha : c.releaseAlpha;
     for (const axis of axes) {
-      const force = Math.abs(a[axis]) < 0.15 ? 0 : clamp(a[axis], 30);
-      this.velocity[axis] += (force * 2.5 - 12 * this.offset[axis]) * dt;
-      this.velocity[axis] *= Math.exp(-5 * dt);
-      this.offset[axis] = clamp(this.offset[axis] + this.velocity[axis] * dt, axis === 'z' ? 0.35 : 0.3);
+      const bounded = clamp(a[axis], c.maxAcceleration);
+      this.filteredAcceleration[axis] += alpha * (bounded - this.filteredAcceleration[axis]);
+      if (Math.abs(this.filteredAcceleration[axis]) < c.deadZone) this.filteredAcceleration[axis] = 0;
     }
-    // Backward travel animates the wind-up; forward/lateral travel makes contact.
-    const striking = this.velocity.z < -0.16 || Math.hypot(this.velocity.x, this.velocity.y) > 0.24;
+    const filtered = this.filteredAcceleration;
+    this.magnitude = Math.hypot(filtered.x, filtered.y, filtered.z);
+    this.angularSpeed = Math.min(c.maxAngularSpeed, Math.hypot(
+      Number(rotationRate.alpha) || 0, Number(rotationRate.beta) || 0, Number(rotationRate.gamma) || 0,
+    ));
+    if (this.magnitude > c.activeAcceleration) {
+      this.activeSince ??= t;
+      this.peak = Math.max(this.peak, this.magnitude);
+    } else if (this.magnitude < c.releaseAcceleration) { this.activeSince = null; this.peak = 0; }
+    const striking = filtered.z < -this.config.arm.phoneForwardAcceleration
+      || (Math.hypot(filtered.x, filtered.y) > 1.1 && this.angularSpeed > 80);
     if (striking && this.activeSince !== null && t - this.activeSince >= 60 && t - this.lastSwing >= 350) {
       this.lastSwing = t;
       return { t, type: 'swing', peak_g: 2.5 + this.peak / CONFIG.physics.gravity,
@@ -56,5 +65,11 @@ export class PaddleMotion {
     }
     return null;
   }
-  pose() { return { px: this.offset.x, py: this.offset.y, pz: this.offset.z }; }
+  pose() {
+    return {
+      motion_x: this.filteredAcceleration.x, motion_y: this.filteredAcceleration.y,
+      motion_z: this.filteredAcceleration.z, motion_magnitude: this.magnitude,
+      angular_speed: this.angularSpeed,
+    };
+  }
 }

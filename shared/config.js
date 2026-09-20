@@ -64,44 +64,48 @@ export const CONFIG = Object.freeze({
     maxDistance: 0.72, minMargin: 0.12, // Physical playtest classification thresholds.
   },
   render: {
-    eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
-    paddlePositionAlpha: 0.34, // Render interpolation only; tracker dynamics are limited separately below.
-    paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
+    eyeHeight: 1.52, cameraAlpha: 0.15, trailLength: 22, // Slightly shorter POV keeps court scale natural near the net.
+    // Main's wider, downward-looking first-person framing.
+    cameraFovDeg: 90, cameraLookDistance: 6, cameraLookHeight: 0.84,
+    paddleRotationAlpha: 0.5, // Reaches a new phone orientation in roughly 80ms at 60fps.
+    paddleMinRightX: 0.08, // Keep the right-handed grip visibly on the right side of the POV.
+    paddle: { headWidth: 0.20, headHeight: 0.24, thickness: 0.035, handleLength: 0.15, handleWidth: 0.045 },
     // Face center relative to the player, shared by renderer and ball contacts.
-    neutralPaddleOffset: { x: 0, y: -0.60, z: -1.05 },
-    maxWristOffset: { x: 0.42, y: 0.32, z: 0.22 }, // Final camera-local safety bounds around neutral.
+    // Keep the authoritative contact height unchanged when camera eye height changes.
+    neutralPaddleOffset: { x: 0.42, y: -0.44, z: -1.05 },
+    maxWristOffset: { x: 0.36, y: 0.4, z: 0.55 }, // Favor visible reach depth over side-to-side screen travel.
   },
   tracking: {
-    neutralWristOffset: { x: 0, y: -0.28, z: -0.62 }, // Anatomical grip reference, independent of the rendered face center.
+    neutralWristOffset: { x: 0.28, y: -0.28, z: -0.62 }, // Stable right-side grip reference in camera-local space.
+    neutralElbowOffset: { x: 0.36, y: -0.25, z: -0.52 },
     version: '0.10.21',
     visibility: 0.65, // 0.5–0.8: reject uncertain shoulder landmarks.
     calibrationFrames: 20, // 15–45: about 1.3 seconds at 15 Hz.
     calibrationTolerance: 0.035, // 0.02–0.06: stand still in normalized image units.
     minShoulderWidth: 0.06, // 0.04–0.10: reject distant/small detections.
     shoulderMeters: 0.42, // 0.35–0.55: approximate physical shoulder width.
-    referenceDistance: 2.5, // 1.5–4 m: assumed distance at calibration; depth is a proxy.
+    referenceDistance: 2.5, // Assumed camera distance at calibration; shoulder scale is the depth proxy.
+    depthGain: 2.5, // Map roughly ten feet of forward travel from baseline to the kitchen line.
     lateralGain: 2.5, // Cover the court with smaller physical sidesteps.
     lateralResponseSeconds: 0.045, // Fast response while moving; quiet readings remain filtered.
     lateralRestResponseSeconds: 0.14,
     lateralDeadZone: 0.015, // Metres in court space.
     positionAlpha: 0.2, // 0.1–0.35: smooth camera position estimates.
     movementDeadZone: 0.035, // 0.015–0.08 m: ignore stationary court-position jitter.
-    minDepth: 2.6, maxDepth: 6.1, // Stay on your side of the court.
+    minDepth: 2.1336, maxDepth: 6.1, // Kitchen line to the rear playable area; never cross the net.
     edgeMargin: 0.35, // 0.2–0.6 m: avoid placing the player on the sideline.
     markerRadius: 0.35, // 0.2–0.5 m: ground-position circle size.
     wristVisibility: 0.65, // 0.55–0.8: low-confidence hands do not drive the paddle.
-    wristMedianSamples: 5, // 3–7: odd window suppresses isolated landmark spikes.
-    wristFilterAlpha: 0.22, // 0.12–0.35: low-pass on normalized hand position.
-    wristLateralGain: 0.9, wristVerticalGain: 0.72, // 0.6–1.2: physical-looking hand travel without amplification spikes.
+    paddleWrist: 16, // MediaPipe right arm, mapped to the first-person right side; never hand off.
+    wristMedianSamples: 3, // Short window rejects spikes without hiding deliberate arm travel.
+    wristFilterAlpha: 0.18, wristMovingAlpha: 0.68, // Slow at rest, responsive during deliberate arm travel.
+    elbowFilterAlpha: 0.34, // Elbow drives the IK bend plane without copying landmark jitter.
+    wristResponsiveSpeed: 0.8, // Shoulder-widths/s at which the moving filter is fully engaged.
+    wristLateralGain: 0.82, wristVerticalGain: 0.9, // Restrained lateral travel keeps the path reading as an arc.
     wristSampleMaxJump: 0.85, // 0.5–1.2 shoulder widths: reject one-frame x/y teleportation.
-    wristMaxVelocity: 1.15, // 0.7–1.8 m/s: handle translation speed limit.
-    wristMaxAcceleration: 5.5, // 3–9 m/s²: handle translation acceleration limit.
-    armReachRadius: 0.68, // 0.55–0.8 m from the estimated active shoulder.
-    swingStartVelocity: 0.32, // 0.2–0.55 normalized shoulder-widths/s.
-    swingTravel: 0.8, // 0.6–1.2 shoulder widths from preparation through follow-through.
-    swingArcDepth: 0.21, // 0.14–0.28 m: outward reach at contact.
-    swingCloseBias: 0.035, // 0–0.08 m: start/follow-through depth toward the body.
-    swingIdleMs: 320, // 220–500 ms: end an abandoned/finished arc after lateral motion stops.
+    wristMaxVelocity: 1.35, // 0.7–1.8 m/s: handle translation speed limit.
+    wristMaxAcceleration: 7, // 3–9 m/s²: handle translation acceleration limit.
+    armReachRadius: 0.9, // 0.7–0.95 m camera-space envelope around the active shoulder.
     wristLossTimeoutMs: 450, // 250–1000 ms: hold the last reliable wrist before returning neutral.
     wristReturnAlpha: 0.1, // 0.05–0.25 per tracking tick: neutral return after a longer loss.
     jumpThreshold: 0.14, // 0.08–0.25 body lengths above baseline before confirming a jump.
@@ -109,6 +113,24 @@ export const CONFIG = Object.freeze({
     verticalDeadZone: 0.045, // 0.02–0.08 body lengths: suppress breathing/camera noise.
     verticalAlpha: 0.22, // 0.1–0.4 per tracking tick: smooth POV rise and landing.
     maxPovRise: 0.65, // 0.35–0.9 m: maximum render-only upward camera displacement.
+  },
+  arm: {
+    upperArmLength: 0.43, forearmLength: 0.43, reachEpsilon: 0.015,
+    nearPlane: -0.22,
+    windupLateral: 0.28, windupDrop: 0.2, windupDepth: 0.08,
+    earlyLateral: 0.18, earlyDrop: 0.12, earlyDepth: 0.3,
+    contactLateral: 0.04, contactLift: 0.02, contactDepth: 0.8,
+    followLateral: 0.3, followLift: 0.1, followDepth: 0.22,
+    prepareFraction: 0.18, contactProgress: 0.56, contactReachDepth: 0.17,
+    prepareDurationMs: 150, forwardDurationMs: 230, contactHoldMs: 70, followDurationMs: 280,
+    recoverMinMs: 140, swingWeight: 0.88,
+    cameraPrepareSpeed: 0.32, cameraForwardSpeed: 0.16,
+    phonePrepareAcceleration: 0.75, phoneForwardAcceleration: 0.55, phoneFullIntensity: 5,
+    intensitySpeedup: 0.28,
+    cameraVelocityHoldMs: 120, phoneFeatureHoldMs: 160,
+    cameraHoldMs: 480, cameraRecoverMs: 900,
+    spring: 100, damping: 20, maxVelocity: 2.4, maxAcceleration: 22,
+    restVelocity: 0.08, restDistance: 0.025,
   },
   network: {
     port: 8443, reconnectMs: 1500, // 500–5000: browser reconnect delay.
@@ -120,6 +142,11 @@ export const CONFIG = Object.freeze({
   controller: {
     poseTimeoutMs: 500, // Ignore stale orientation when sensors stop delivering samples.
     center: { pitch: 55.5, roll: -1.7, yawRate: 0 }, // Measured upright phone pose.
+    motionFeatures: {
+      deadZone: 0.22, accelerationAlpha: 0.28, releaseAlpha: 0.12,
+      activeAcceleration: 0.6, releaseAcceleration: 0.22,
+      maxAcceleration: 24, maxAngularSpeed: 1800,
+    },
     // Both platforms use the W3C frame. Calibration removes heading only; platform-specific Euler sign patches must not be added here.
     ios: { frame: 'w3c-deviceorientation' },
     android: { frame: 'w3c-deviceorientation' },

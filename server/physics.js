@@ -109,8 +109,8 @@ export class Simulation {
 
     const speed = speedFromPeak(msg.peak_g, this.config.calibration);
     const controller = normalizeControllerPose(controllerPose);
-    // Screen normal is camera-local: +X right, +Y up, -Z forward.
-    // Rendering, acceleration integration, and launch all share this frame.
+    // Controller +Z is centered in the player's neutral local frame. Seat
+    // mirroring happens only when local right/forward become court X/Z.
     const face = controller && {
       x: 2 * (controller.qx * controller.qz + controller.qw * controller.qy),
       y: 2 * (controller.qy * controller.qz - controller.qw * controller.qx),
@@ -120,7 +120,7 @@ export class Simulation {
       : Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = face ? Math.atan2(face.x, -face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const azimuth = face ? Math.atan2(face.x, face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
 
     const raw = {

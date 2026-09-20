@@ -1,4 +1,3 @@
-import { paddleCenter } from '/shared/paddle-motion.js';
 import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
@@ -110,8 +109,15 @@ let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.homeDepth };
-let trackingRenderState = { wristOffset: { ...CONFIG.render.neutralPaddleOffset }, jumpHeight: 0 };
-let controllerPose = { qx: 0, qy: 1, qz: 0, qw: 0, px: 0, py: 0, pz: 0 };
+let trackingRenderState = {
+  wristOffset: { ...CONFIG.tracking.neutralWristOffset },
+  shoulderOffset: { x: CONFIG.tracking.shoulderMeters / 2, y: -0.12, z: -0.4 },
+  elbowOffset: { ...CONFIG.tracking.neutralElbowOffset },
+  trackingPresent: false,
+  wristConfidence: 0,
+  jumpHeight: 0,
+};
+let controllerPose = { qx: 0, qy: 0, qz: 0, qw: 1 };
 let phoneBaseURL = new URL('/client-phone/', location.href);
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
@@ -425,7 +431,7 @@ function createCourt(THREE) {
 
   const attack = -seatSign;
   playerPosition = { x: CONFIG.player.x, z: seatSign * CONFIG.player.homeDepth };
-  const camera = new THREE.PerspectiveCamera(90, 1, 0.05, 100);
+  const camera = new THREE.PerspectiveCamera(CONFIG.render.cameraFovDeg, 1, 0.05, 100);
   const cameraTarget = new THREE.Vector3(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
   camera.position.copy(cameraTarget);
   scene.add(camera);
@@ -533,47 +539,54 @@ function createCourt(THREE) {
   playerRing.rotation.x = -Math.PI / 2;
   scene.add(playerRing);
 
-  // The face is centered on the shared court-space ball contact point.
+  // Camera-local first-person paddle. The group origin is the grip: camera
+  // tracking moves the handle while phone orientation rotates around it.
   const paddle = new THREE.Group();
+  const paddleSize = CONFIG.render.paddle;
+  const faceFromGrip = paddleSize.handleLength / 2 + paddleSize.headHeight / 2 - 0.025;
+  const headRadius = paddleSize.headWidth / 2;
   const face = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32),
+    new THREE.CylinderGeometry(headRadius, headRadius, paddleSize.thickness, 32),
     new THREE.MeshStandardMaterial({
       color: '#dbe86b', roughness: 0.55, metalness: 0.03,
-      transparent: true, opacity: 0.48, depthWrite: false,
+      transparent: true, opacity: 0.58, depthWrite: false,
+      side: THREE.DoubleSide,
     }),
   );
   face.rotation.x = Math.PI / 2;
-  face.scale.set(0.92, 1, 1.22);
+  face.position.y = faceFromGrip;
+  face.scale.set(1, 1, paddleSize.headHeight / paddleSize.headWidth);
   face.castShadow = true;
   paddle.add(face);
   const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(0.17, 0.012, 8, 32),
-    new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7, transparent: true, opacity: 0.6, depthWrite: false }),
+    new THREE.TorusGeometry(headRadius, 0.008, 8, 32),
+    new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7, transparent: true, opacity: 0.82, depthWrite: false }),
   );
-  rim.scale.y = 1.22;
+  rim.position.y = faceFromGrip;
+  rim.scale.y = paddleSize.headHeight / paddleSize.headWidth;
   rim.castShadow = true;
   paddle.add(rim);
   const handle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.07, 0.22, 0.055),
-    new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9, transparent: true, opacity: 0.6, depthWrite: false }),
+    new THREE.BoxGeometry(paddleSize.handleWidth, paddleSize.handleLength, paddleSize.thickness),
+    new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9, transparent: true, opacity: 0.72, depthWrite: false }),
   );
-  handle.position.y = -0.28;
+  handle.position.y = 0;
   handle.castShadow = true;
   paddle.add(handle);
-  const paddleTargetPosition = new THREE.Vector3(CONFIG.render.neutralPaddleOffset.x, CONFIG.render.neutralPaddleOffset.y, CONFIG.render.neutralPaddleOffset.z);
+  const neutralGrip = CONFIG.tracking.neutralWristOffset;
+  const paddleTargetPosition = new THREE.Vector3(neutralGrip.x, neutralGrip.y, neutralGrip.z);
   const paddleTargetQuaternion = new THREE.Quaternion(0, 0, 0, 1);
-  paddle.position.copy(paddleTargetPosition);
-  scene.add(paddle);
-  let paddleMotion = {};
-  let readyAtPaddle = false;
-  const seatRotation = new THREE.Quaternion();
+  paddle.position.set(0, 0, 0);
+  const hand = new THREE.Group();
+  hand.position.copy(paddleTargetPosition);
+  hand.add(paddle);
+  camera.add(hand);
   function updateTracking(state) {
     if (!state?.wristOffset || !Number.isFinite(state.jumpHeight)) return;
-    // Paddle translation comes from the phone; body tracking controls the player.
+    trackingRenderState = state;
   }
   function updateController(pose) {
     if (!validMessage(pose)) return;
-    paddleMotion = pose;
     paddleTargetQuaternion.set(pose.qx, pose.qy, pose.qz, pose.qw).normalize();
   }
   updateTracking(trackingRenderState);
@@ -608,7 +621,6 @@ function createCourt(THREE) {
     trailGeometry.setDrawRange(0, 0);
   }
   function applyState(state, previousPhase) {
-    readyAtPaddle = state.phase === 'ready' && state.ready_for === localPlayer;
     if (state.phase !== 'rally' || previousPhase !== 'rally') clearTrail();
     ball.visible = ballShadow.visible = state.phase !== 'idle';
     ball.position.set(state.ball.x, state.ball.y, state.ball.z);
@@ -635,6 +647,10 @@ function createCourt(THREE) {
       opponentGroup.visible = false;
       return;
     }
+    if (Math.hypot(pose.court_x - playerPosition.x, pose.court_y - playerPosition.z) < 1) {
+      opponentGroup.visible = false;
+      return;
+    }
     opponentGroup.visible = true;
     opponentGroup.position.set(pose.court_x, 0, pose.court_y);
     opponentGroup.rotation.y = seatSign > 0 ? 0 : Math.PI;
@@ -651,24 +667,34 @@ function createCourt(THREE) {
   });
   resizeObserver.observe(container);
   renderer.setAnimationLoop(() => {
-    cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight + trackingRenderState.jumpHeight, playerPosition.z);
+    // Keep walking eye level fixed. Perspective changes while approaching the
+    // camera can look like a jump to monocular tracking and must not raise POV.
+    cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     // Lateral tracking is already filtered; avoid a second delay in the view.
     camera.position.x = cameraTarget.x;
-    // Camera heading must share the controller's forward axis at every position.
-    camera.lookAt(playerPosition.x, 1.0, playerPosition.z + attack * 6);
-    const center = paddleCenter(playerPosition, localPlayer, paddleMotion);
     const ownColor = localPlayer === 'B' ? '#438ef5' : '#f05c65';
     const otherColor = localPlayer === 'B' ? '#f05c65' : '#438ef5';
     face.material.color.set(ownColor);
     playerRing.material.color.set(ownColor);
     opponentBody.material.color.set(otherColor);
     opponentPaddle.material.color.set(otherColor);
-    paddle.position.set(center.x, center.y, center.z);
-    seatRotation.set(0, seatSign > 0 ? 0 : 1, 0, seatSign > 0 ? 1 : 0);
-    paddle.quaternion.copy(seatRotation).multiply(paddleTargetQuaternion);
-    if (readyAtPaddle) ball.position.copy(paddle.position);
+    camera.lookAt(
+      playerPosition.x,
+      CONFIG.render.cameraLookHeight,
+      playerPosition.z + attack * CONFIG.render.cameraLookDistance,
+    );
+    // Camera tracking is the only owner of handle translation. Phone motion is
+    // deliberately excluded here: it can rotate the paddle and report contact,
+    // but accelerometer noise can never launch or drift the visible handle.
+    paddleTargetPosition.set(
+      Math.max(CONFIG.render.paddleMinRightX, trackingRenderState.wristOffset.x),
+      trackingRenderState.wristOffset.y,
+      trackingRenderState.wristOffset.z,
+    );
+    hand.position.copy(paddleTargetPosition);
+    paddle.quaternion.slerp(paddleTargetQuaternion, CONFIG.render.paddleRotationAlpha);
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {

@@ -31,7 +31,7 @@ export function validMessage(msg) {
     classification: [],
     ruling_evidence: [],
     spawn: [],
-    controller_pose: ['px', 'py', 'pz'],
+    controller_pose: ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'],
     hello: [],
   };
   const extras = Object.keys(msg).filter(key => !required.includes(key));
@@ -77,8 +77,12 @@ export function validMessage(msg) {
     case 'spawn': return finite(msg.t) && msg.t >= 0;
     case 'controller_pose': {
       if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;
-      const hasPosition = ['px', 'py', 'pz'].some(k => Object.hasOwn(msg, k));
-      if (hasPosition && !['px', 'py', 'pz'].every(k => finite(msg[k]) && Math.abs(msg[k]) <= 0.4)) return false;
+      const motionFields = ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'];
+      const hasMotion = motionFields.some(k => Object.hasOwn(msg, k));
+      if (hasMotion && !motionFields.every(k => finite(msg[k]))) return false;
+      if (hasMotion && (['motion_x', 'motion_y', 'motion_z'].some(k => Math.abs(msg[k]) > 30)
+        || msg.motion_magnitude < 0 || msg.motion_magnitude > 60
+        || msg.angular_speed < 0 || msg.angular_speed > 3000)) return false;
       const lengthSquared = msg.qx ** 2 + msg.qy ** 2 + msg.qz ** 2 + msg.qw ** 2;
       return lengthSquared >= 1e-8 && lengthSquared <= 1e8;
     }

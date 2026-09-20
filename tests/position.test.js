@@ -7,8 +7,10 @@ function body(center = 0.5, width = 0.2, bodyY = 0.65, wrist = { x: center - 0.2
   const points = Array.from({ length: 33 }, () => ({ x: center, y: bodyY, z: 0, visibility: 1 }));
   points[11] = { x: center - width / 2, y: bodyY - 0.25, z: 0, visibility: 1 };
   points[12] = { x: center + width / 2, y: bodyY - 0.25, z: 0, visibility: 1 };
-  points[15] = { ...wrist, visibility };
-  points[16] = { x: center + 0.22, y: 0.5, z: 0, visibility: 0.7 };
+  points[13] = { x: center + 0.17, y: bodyY - 0.19, z: 0, visibility: 1 };
+  points[14] = { x: center - 0.17, y: bodyY - 0.19, z: 0, visibility: 1 };
+  points[15] = { x: center + 0.22, y: 0.5, z: 0, visibility: 0.7 };
+  points[16] = { ...wrist, visibility };
   return points;
 }
 function calibrated() {
@@ -33,6 +35,16 @@ test('calibrates, maps body motion, and freezes court position on missing landma
   assert.ok(tracker.position.z <= CONFIG.tracking.maxDepth);
   assert.ok(Math.abs(tracker.position.x) <= CONFIG.court.width / 2 - CONFIG.tracking.edgeMargin);
   tracker.recenter(); assert.equal(tracker.reference, null);
+});
+
+test('forward walking can cover the baseline-to-kitchen distance', () => {
+  const { tracker, now } = calibrated();
+  let pose;
+  // Doubling apparent shoulder width represents a substantial approach toward
+  // a fixed camera; the depth gain should carry that motion to the kitchen.
+  for (let i = 0; i < 45; i++) pose = tracker.update(body(0.5, 0.4), now + (i + 1) * 67);
+  assert.ok(pose.court_y <= CONFIG.court.kitchenDepth + 0.03);
+  assert.ok(pose.court_y >= CONFIG.court.kitchenDepth - 1e-9, 'player stays on their side of the kitchen line');
 });
 
 test('wrist noise and one extreme wrist-Z sample cannot produce a large jump', () => {
@@ -65,21 +77,18 @@ test('paddle translation obeys configured velocity and acceleration limits', () 
   }
 });
 
-test('synthetic lateral swing produces close, far, close arc depth', () => {
+test('camera wrist output is a filtered 2D observation and does not synthesize depth', () => {
   const { tracker, now } = calibrated();
-  const depths = [];
+  const path = [];
   // Smooth travel avoids the single-frame landmark rejection and represents a
   // preparation-to-follow-through sweep across the body.
   for (let i = 0; i <= 70; i++) {
     const x = 0.28 + i / 70 * 0.42;
     tracker.update(body(0.5, 0.2, 0.65, { x, y: 0.5, z: i % 3 }), now + (i + 1) * 67);
-    depths.push(tracker.state().wristOffset.z);
+    path.push({ ...tracker.state().wristOffset });
   }
-  const first = Math.min(...depths.slice(0, 10));
-  const middle = Math.min(...depths.slice(25, 50));
-  const last = Math.min(...depths.slice(-8));
-  assert.ok(middle < first - 0.05, `contact ${middle} reaches farther than start ${first}`);
-  assert.ok(last > middle + 0.04, `follow-through ${last} returns closer than contact ${middle}`);
+  assert.ok(path.every(point => Math.abs(point.z - CONFIG.tracking.neutralWristOffset.z) < 1e-9));
+  assert.ok(Math.abs(path.at(-1).x - path[0].x) > 0.1, 'the stable camera observation retains visible lateral intent');
 });
 
 test('handle stays inside the active-shoulder reach envelope', () => {
@@ -118,6 +127,58 @@ test('shoulders alone drive tracking and lateral wrist travel uses first-person 
   const neutral = { ...tracker.state().wristOffset };
   for (let i = 0; i < 30; i++) tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + i * 0.005, y: 0.5, z: 100 }), now += 67);
   assert.ok(tracker.state().wristOffset.x < neutral.x, 'camera-image right maps left in first-person view');
+});
+
+test('movement from the other wrist cannot switch the paddle off the right side', () => {
+  const { tracker, now } = calibrated();
+  const start = { ...tracker.state().wristOffset };
+  for (let i = 0; i < 30; i++) {
+    const points = body();
+    points[15] = {
+      ...points[15],
+      x: points[15].x + Math.min(i, 20) * 0.012,
+      y: points[15].y - Math.min(i, 12) * 0.006,
+      visibility: 1,
+    };
+    tracker.update(points, now + (i + 1) * 67);
+  }
+  const state = tracker.state();
+  assert.equal(state.activeWrist, CONFIG.tracking.paddleWrist);
+  assert.equal(state.shoulderOffset.x, CONFIG.tracking.shoulderMeters / 2);
+  assert.ok(distance(state.wristOffset, start) < 0.01, 'the non-paddle wrist is ignored');
+});
+
+test('tracked right-side shoulder and elbow drive the rendered arm observations', () => {
+  const { tracker, now } = calibrated();
+  const initial = tracker.state();
+  let state;
+  for (let i = 0; i < 12; i++) {
+    const points = body();
+    points[12].y -= 0.025;
+    points[14].y -= 0.08;
+    points[14].x -= 0.035;
+    tracker.update(points, now + (i + 1) * 67);
+    state = tracker.state();
+  }
+  assert.ok(state.shoulderOffset.y > initial.shoulderOffset.y + 0.02, 'shoulder tilt is observed');
+  assert.ok(state.elbowOffset.y > initial.elbowOffset.y + 0.06, 'elbow lift is observed');
+  assert.ok(state.elbowOffset.x > initial.elbowOffset.x + 0.03, 'elbow lateral bend is observed');
+  assert.equal(state.shoulderOffset.x, CONFIG.tracking.shoulderMeters / 2, 'arm stays on the right side');
+});
+
+test('raising and extending the real right arm moves the hand up and right in first-person space', () => {
+  const raised = calibrated();
+  for (let i = 0; i < 24; i++) {
+    raised.tracker.update(body(0.5, 0.2, 0.65, { x: 0.28, y: 0.5 - Math.min(i, 16) * 0.012, z: 0 }), raised.now + (i + 1) * 34);
+  }
+  assert.ok(raised.tracker.state().wristOffset.y > CONFIG.tracking.neutralWristOffset.y + 0.18, 'overhead arm raises the handle');
+
+  const extended = calibrated();
+  for (let i = 0; i < 24; i++) {
+    // The unmirrored camera sees the player's right hand travel toward lower x.
+    extended.tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 - Math.min(i, 16) * 0.01, y: 0.5, z: 0 }), extended.now + (i + 1) * 34);
+  }
+  assert.ok(extended.tracker.state().wristOffset.x > CONFIG.tracking.neutralWristOffset.x + 0.12, 'right-arm extension moves the handle right');
 });
 
 test('jump needs consistently raised shoulders and returns smoothly after landing', () => {

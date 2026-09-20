@@ -123,7 +123,7 @@ test('player B serves toward positive z and can return player A shots', () => {
   assert.equal(sim.lastHitter, 'A');
 });
 test('controller orientation has equivalent egocentric launch behavior for seats A and B', () => {
-  const angle = (180 - 12) * Math.PI / 180;
+  const angle = 12 * Math.PI / 180;
   const controller = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(angle / 2), qz: 0, qw: Math.cos(angle / 2) };
   const launches = {};
   for (const player of ['A', 'B']) {
@@ -174,7 +174,7 @@ test('phone paddle bearing controls shots for both seats without sideways aim as
       const sim = new Simulation();
       sim.setPose({ t: 1, type: 'pose', court_x: 1, court_y: 5, torso_deg: 80, wrist_h: 0.95 }, player);
       sim.spawn(player);
-      const yaw = (180 - degrees) * Math.PI / 180;
+      const yaw = degrees * Math.PI / 180;
       const aim = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2) };
       assert.equal(sim.swing({ ...swing, roll: -90 }, player, aim), true);
       const sign = player === 'A' ? 1 : -1;

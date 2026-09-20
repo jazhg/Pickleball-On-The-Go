@@ -93,11 +93,11 @@ test('two laptop stations get distinct seats and opponent-only poses', async () 
     assert.equal(firstClient.hello.player, 'A');
     assert.equal(secondClient.hello.player, 'B');
 
-    const poseForSecond = waitForMessage(second, message => message.type === 'pose' && message.player === 'A');
+    const poseForSecond = waitForMessage(second, message => message.type === 'pose' && message.player === 'A' && message.court_x === 0.25);
     first.send(JSON.stringify({ t: Date.now(), type: 'pose', court_x: 0.25, court_y: 5.2, torso_deg: 10, wrist_h: 0.95 }));
     assert.equal((await poseForSecond).court_y, 5.2);
 
-    const poseForFirst = waitForMessage(first, message => message.type === 'pose' && message.player === 'B');
+    const poseForFirst = waitForMessage(first, message => message.type === 'pose' && message.player === 'B' && message.court_x === 0.4);
     second.send(JSON.stringify({ t: Date.now(), type: 'pose', court_x: 0.4, court_y: 5.4, torso_deg: -8, wrist_h: 0.92 }));
     const opponent = await poseForFirst;
     assert.equal(opponent.court_x, 0.4);
@@ -184,7 +184,7 @@ test('two live player stations share one rally without the solo bot taking Playe
     relay.sim.events.push({ type: 'bounce', time: relay.sim.age, x: 0, z: -3, in_bounds: true });
     await new Promise(resolve => setTimeout(resolve, 450));
     assert.equal(relay.sim.lastHitter, 'A');
-    bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0 }));
+    bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 }));
     Object.assign(relay.sim.ball, relay.sim.paddle('B'));
     bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
     await waitForMessage(aLaptop.ws, message => message.type === 'state' && message.phase === 'rally' && message.last_hitter === 'B');
@@ -214,10 +214,10 @@ test('contact uses latest phone aim even after visual rate limiting, without lea
     phone = (await openClient(`${endpoint}?role=phone&seat=B`)).ws;
     laptop = (await openClient(`${endpoint}?role=laptop&seat=B`)).ws;
     relay.sim.spawn('B');
-    const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0 };
+    const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 };
     for (let i = 0; i < 8; i++) phone.send(JSON.stringify(pose));
     // 45 degrees to the player's right, delivered immediately before contact.
-    phone.send(JSON.stringify({ ...pose, qy: Math.sin(3 * Math.PI / 8), qw: Math.cos(3 * Math.PI / 8) }));
+    phone.send(JSON.stringify({ ...pose, qy: Math.sin(Math.PI / 8), qw: Math.cos(Math.PI / 8) }));
     const shot = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'phone');
     phone.send(JSON.stringify({ t: 2, type: 'swing', ...CONFIG.swing.synthetic }));
     assert.equal((await shot).accepted, true);
