@@ -27,6 +27,8 @@ export const CONFIG = Object.freeze({
     pitchGain: 0.18, // 0.1–0.3: reduce sensitivity to phone tilt.
     maxPitchInputDeg: 30, // 15–40: limit raw pitch before applying gain.
     maxUpwardSpeed: 3.8, // 3–5 m/s: cap loft AFTER aim assist.
+    netClearance: 0.22, // Extra space above the net for assisted paddle hits.
+    maxAssistedUpwardSpeed: 5.8, // Allow softer/deeper hits enough lift to cross.
     minElevationDeg: 12, maxElevationDeg: 24, // 8–15 and 20–30.
     rollGain: 0.25, torsoGain: 0.5, // 0–1: azimuth weights.
     maxAzimuthDeg: 38, // 20–60: keep the first demo facing the far court.

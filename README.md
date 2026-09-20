@@ -1,5 +1,14 @@
 # Pickleball On The Go — Milestone 1 + Nemotron
 
+Recorded referee voice uses the clips in `client-laptop/audio/referee/` and replaces
+browser text-to-speech. The existing Voice toggle mutes recordings and remembers the
+choice. Confirmed serve and ruling events select factual calls. With `NEMOTRON_LIVE=1`
+and `NVIDIA_API_KEY`, Nemotron may choose one eligible praise recording or silence,
+at most once per 15 seconds; repeated praise waits 60 seconds. Late responses after
+the next contact are discarded. Calls never queue, and music lowers during speech.
+Offline play retains factual calls but omits model-selected praise. Recovery and
+game-point clips are included but reserved until reliable detection is implemented.
+
 **Nemotron does real work here — not chatbot work.** Two NVIDIA Nemotron models are wired
 into the live game loop: Nemotron 3 Nano classifies every swing (shot, target zone,
 confidence) from phone IMU data, and a Nemotron referee adjudicates every rally from the

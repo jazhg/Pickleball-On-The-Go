@@ -72,6 +72,12 @@ export async function adjudicateRally(events, gameState, opts = {}) {
   );
 }
 
+export async function chooseCommentary(context, eligible) {
+  if (!isLiveMode()) return null;
+  const response = await runBridge({ op: 'commentary', context, eligible }, { timeoutMs: 2500 });
+  return response?.path === 'model' && eligible.includes(response.clip) ? response.clip : null;
+}
+
 // Node-side score safety: validate score and side_out before anything mutates.
 // Returns the ruling when safe to apply, null when malformed.
 export function validateRulingForApply(ruling, currentScore) {

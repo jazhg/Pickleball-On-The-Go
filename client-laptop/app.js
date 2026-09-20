@@ -3,8 +3,10 @@ import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
 import { setupBackgroundMusic } from './background-music.js';
 import { setupImpactAudio } from './bounce-audio.js';
+import { setupRefereeVoice } from './referee-voice.js';
 
 setupBackgroundMusic();
+const refereeVoice = setupRefereeVoice();
 const playGroundBounce = setupImpactAudio('./audio/ground-bounce.mp3', { replacePrevious: true });
 const playRacketHit = setupImpactAudio('./audio/racket-hit.mp3');
 
@@ -36,32 +38,9 @@ const ui = Object.fromEntries([
 ].map((id) => [id, document.getElementById(id)]));
 
 // --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
-let voiceMuted = false;
 let classifyTimer = null;
 const analytics = { shots: {}, confSum: 0, confN: 0, rallies: 0, errors: 0 };
 
-const RULE_WORDS = {
-  rally_outcome: 'rally over', serve_foot: 'serve foot fault', serve_height: 'serve too high',
-  serve_motion: 'illegal serve motion', serve_paddle: 'paddle above the wrist',
-  serve_target: 'serve off target', serve_kitchen: 'serve into the kitchen',
-  two_bounce: 'two bounce rule', nvz_volley: 'kitchen volley', nvz_momentum: 'kitchen momentum',
-};
-
-function speakRuling(message) {
-  if (voiceMuted || !('speechSynthesis' in window)) return;
-  const words = RULE_WORDS[message.rule] || String(message.rule).replace(/_/g, ' ');
-  const text = message.fault
-    ? `Fault. ${teamName(message.player)}. ${words}.`
-    : 'No fault. Play on.';
-  speechSynthesis.cancel();
-  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-}
-
-ui['voice-toggle'].addEventListener('click', () => {
-  voiceMuted = !voiceMuted;
-  ui['voice-toggle'].textContent = voiceMuted ? '🔇 Voice off' : '🔊 Voice on';
-  if (voiceMuted && 'speechSynthesis' in window) speechSynthesis.cancel();
-});
 
 function renderAnalytics() {
   const entries = Object.entries(analytics.shots);
@@ -306,7 +285,6 @@ function receiveRuling(message) {
   analytics.rallies += 1;
   if (message.fault && message.player === 'A') analytics.errors += 1;
   renderAnalytics();
-  speakRuling(message);
 }
 
 function connect() {
@@ -346,6 +324,7 @@ function connect() {
       return;
     }
     if (isState(message)) receiveState(message);
+    else if (message.type === 'referee_voice') refereeVoice.receive(message);
     else if (message.type === 'ground_bounce' && Number.isFinite(message.t)) playGroundBounce();
     else if (message.type === 'racket_hit' && Number.isFinite(message.t)) playRacketHit();
     else if (message.type === 'controller_pose' && validMessage(message)) {
@@ -358,6 +337,7 @@ function connect() {
     else if (message.type === 'ruling_evidence') receiveRulingEvidence(message);
   });
   socket.addEventListener('close', () => {
+    refereeVoice.reset();
     setConnection('Connection lost', 'disconnected');
     updateControls();
     if (!closing) {

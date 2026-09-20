@@ -10,7 +10,8 @@ import { CONFIG } from '../shared/config.js';
 import { normalizeControllerPose, parseMessage } from '../shared/protocol.js';
 import { parseAnalysis } from '../shared/shot-telemetry.js';
 import { Simulation } from './physics.js';
-import { adjudicateRally, classifySwing, validateRulingForApply } from './nemotron-bridge.js';
+import { adjudicateRally, classifySwing, validateRulingForApply, chooseCommentary } from './nemotron-bridge.js';
+import { RefereeVoiceGate } from '../shared/referee-clips.js';
 
 // Translate authoritative sim events into fixture-style referee events so the
 // Nemotron referee judges the same shape it was evaluated on.
@@ -87,6 +88,31 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       if (client.role === 'laptop' && client.readyState === WebSocket.OPEN && client.bufferedAmount < 65536) client.send(text);
     }
   };
+  const voiceGate = new RefereeVoiceGate();
+  let voiceId = 0, commentaryPending = false, lastCommentaryRequest = -Infinity;
+  function announce(clip, priority = 'official') {
+    const now = Date.now();
+    if (voiceGate.allow(clip, priority, now)) sendToLaptops({ type: 'referee_voice', id: ++voiceId, clip, priority, expires_at: now + 3500 });
+  }
+  async function considerCommentary(shot, player) {
+    const now = Date.now();
+    if (commentaryPending || now - lastCommentaryRequest < 15000 || now - voiceGate.last < 6000) return;
+    const events = sim.events, contact = events.at(-1);
+    const hits = events.filter(event => event.type === 'contact').length;
+    if (hits < 3) return;
+    const speed = shot.launch_speed_mps;
+    const eligible = ['great_return'];
+    if (speed >= 10 && shot.launch_angle_deg < 30) eligible.push('drive');
+    if (Math.abs(sim.ball.vx) > Math.abs(sim.ball.vz) * 0.5) eligible.push('angle');
+    if (hits >= 6) eligible.push('rally');
+    if (Math.max(...sim.score) >= 8 && Math.abs(sim.score[0] - sim.score[1]) <= 1) eligible.push('close_game');
+    commentaryPending = true; lastCommentaryRequest = now;
+    try {
+      const clip = await chooseCommentary({ player, hits, speed_mps: speed, angle_degrees: shot.launch_angle_deg, score: [...sim.score] }, eligible);
+      // The next hit or a new point makes this particular moment obsolete.
+      if (clip && sim.phase === 'rally' && sim.events === events && sim.events.findLast(e => e.type === 'contact') === contact) announce(clip, 'praise');
+    } finally { commentaryPending = false; }
+  }
   const handler = async (req, res) => {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Permissions-Policy': 'accelerometer=(self), gyroscope=(self)' };
     let pathname;
@@ -250,6 +276,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         sendToLaptops(shot);
         if (accepted) {
           sendToLaptops({ type: 'racket_hit', t: Date.now() });
+          considerCommentary(shot, seat).catch(() => {});
           // Physics launches immediately; classification runs async and must never
           // block the 120 Hz sim loop. The bridge always resolves (fallback included).
           const pose = sim.pose ? { wrist_h: sim.pose.wrist_h, phase: sim.phase } : {};
@@ -262,7 +289,8 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         }
         console.log(`[${ws.role} ${seat}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
       } else if (msg.type === 'spawn') {
-        sim.spawn(ws.player || 'A');
+        const player = ws.player || 'A';
+        if (sim.spawn(player)) announce(player === 'A' ? 'red_serves' : 'blue_serves');
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
         const seat = ws.player || 'A';
         sim.setPose(msg, seat);
@@ -282,15 +310,22 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     // Adjudication is async and never blocks the sim; a missing or malformed
     // ruling leaves the score untouched (offline-safe default).
     const envelope = buildRallyEnvelope(sim);
+    const rallyEvents = sim.events;
     const shotAtRallyEnd = lastClassification; // snapshot: a fast next swing must not rewrite this rally's evidence
     let response = null;
     try { response = await adjudicateRally(envelope.events, envelope.game_state); }
     catch (error) { console.warn('[nemotron] referee bridge failed:', error.message); }
     if (!response || !response.ruling) return;
+    if (sim.events !== rallyEvents) return; // Never apply or announce a previous point over a new rally.
     const ruling = validateRulingForApply(response.ruling, sim.score);
     if (!ruling) { console.warn('[nemotron] ruling rejected by score guard'); return; }
+    const oldScore = [...sim.score];
     sim.score = [...ruling.score];
     if (ruling.side_out) sim.servingTeam = sim.servingTeam === 'A' ? 'B' : 'A';
+    const winner = ruling.score.findIndex((score, index) => score > oldScore[index]);
+    const clip = winner >= 0 ? (winner === 0 ? 'point_red' : 'point_blue')
+      : ruling.side_out ? 'side_out' : ruling.fault ? (ruling.player === 'A' ? 'fault_red' : 'fault_blue') : 'replay';
+    if (sim.phase !== 'rally' && sim.phase !== 'ready') announce(clip);
     sendToLaptops({ type: 'ruling', fault: ruling.fault, player: ruling.player,
       rule: ruling.rule, explanation: ruling.explanation, score: [...ruling.score], side_out: ruling.side_out });
     sendToLaptops({ t: Date.now(), type: 'ruling_evidence', rule: ruling.rule,

@@ -5,6 +5,26 @@ import { CONFIG } from '../shared/config.js';
 import { validMessage, parseMessage } from '../shared/protocol.js';
 const swing = { t: 1234567, type: 'swing', ...CONFIG.swing.synthetic };
 
+test('soft phone serves and returns clear the net for both players while preserving aim', () => {
+  for (const player of ['A', 'B']) for (const serving of [true, false]) for (const degrees of [-20, 0, 20]) {
+    const sim = new Simulation(), sign = CONFIG.seats[player].sign;
+    const yaw = degrees * Math.PI / 180;
+    const aim = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2) };
+    sim.spawn(player);
+    if (!serving) {
+      sim.phase = 'rally'; sim.lastHitter = player === 'A' ? 'B' : 'A';
+      Object.assign(sim.ball, sim.paddle(player));
+    }
+    assert.equal(sim.swing({ ...swing, peak_g: CONFIG.calibration.softG }, player, aim), true);
+    assert.ok(Math.abs(Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) - yaw) < 1e-10);
+    let bounce;
+    for (let i = 0; i < 500 && !bounce; i++) { sim.step(); bounce = sim.events.find(e => e.type === 'bounce'); }
+    assert.ok(bounce && bounce.z * sign < 0, `${player} ${serving ? 'serve' : 'return'} at ${degrees} crosses before bouncing`);
+    assert.equal(sim.events.some(e => e.type === 'net_contact'), false);
+    assert.equal(bounce.in_bounds, true);
+  }
+});
+
 test('positive roll aims left and negative roll aims right', () => {
   const launch = roll => {
     const sim = new Simulation();

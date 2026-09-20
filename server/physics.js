@@ -7,6 +7,38 @@ const SEAT = { A: 1, B: -1 };
 const seatSign = (player) => SEAT[player] ?? 1;
 const opponentOf = (player) => (player === 'A' ? 'B' : 'A');
 
+// Predict using the same drag and integration as the live ball. Only add loft
+// for a shot aimed through the net; never rotate the player's horizontal aim.
+function assistNetClearance(ball, config) {
+  const c = config.physics, court = config.court;
+  if (ball.z * ball.vz >= 0) return;
+  const crossingX = ball.x - ball.z * ball.vx / ball.vz;
+  if (Math.abs(crossingX) > court.width / 2 + c.ballRadius) return;
+  const target = court.netHeight + (court.netPostHeight - court.netHeight)
+    * Math.min(1, Math.abs(crossingX) / (court.width / 2)) + c.ballRadius + c.netClearance;
+  const clears = vy => {
+    const b = { ...ball, vy }, dt = 1 / config.simulation.hz;
+    for (let i = 0; i < config.simulation.hz * 3; i++) {
+      const oldZ = b.z, oldY = b.y, speed = Math.hypot(b.vx, b.vy, b.vz);
+      b.vx -= c.drag * speed * b.vx * dt;
+      b.vy -= (c.gravity + c.drag * speed * b.vy) * dt;
+      b.vz -= c.drag * speed * b.vz * dt;
+      b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+      if (oldZ * b.z <= 0) return oldY + (b.y - oldY) * oldZ / (oldZ - b.z) >= target;
+      if (b.y <= c.ballRadius) return false;
+    }
+    return false;
+  };
+  if (clears(ball.vy)) return;
+  let low = ball.vy, high = c.maxAssistedUpwardSpeed;
+  if (!clears(high)) { ball.vy = high; return; }
+  for (let i = 0; i < 10; i++) {
+    const mid = (low + high) / 2;
+    if (clears(mid)) high = mid; else low = mid;
+  }
+  ball.vy = high;
+}
+
 export function speedFromPeak(peak, calibration = CONFIG.calibration) {
   const c = calibration;
   if (peak <= 0) return CONFIG.physics.minSpeed;
@@ -143,6 +175,7 @@ export class Simulation {
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;
     ball.vy = Math.min(ball.vy, c.maxUpwardSpeed);
+    assistNetClearance(ball, this.config);
 
     this.phase = 'rally';
     this.readyFor = null;

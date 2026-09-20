@@ -6,6 +6,26 @@ import { createRelay } from '../server/index.js';
 import { CONFIG } from '../shared/config.js';
 import { validMessage } from '../shared/protocol.js';
 
+test('serve recordings reach both players once, without replaying on rejected spawn requests', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;
+  const a = new WebSocket(`${endpoint}&seat=A`), b = new WebSocket(`${endpoint}&seat=B`);
+  try {
+    await Promise.all([once(a, 'open'), once(b, 'open')]);
+    let count = 0;
+    a.on('message', data => { if (JSON.parse(String(data)).type === 'referee_voice') count++; });
+    const heard = Promise.all([a, b].map(ws => waitForMessage(ws, msg => msg.type === 'referee_voice')));
+    a.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+    const messages = await heard;
+    assert.equal(messages[0].clip, 'red_serves');
+    assert.deepEqual(messages[0], messages[1]);
+    assert.ok(messages[0].expires_at > Date.now());
+    for (let i = 0; i < 10; i++) a.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(count, 1);
+  } finally { a.close(); b.close(); await relay.close(); }
+});
+
 test('confirmed racket contacts sound on both laptops, missed swings stay silent', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;

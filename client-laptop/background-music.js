@@ -8,6 +8,7 @@ export function setupBackgroundMusic() {
   let index = 0, enabled = true;
   try { enabled = localStorage.getItem('background-music-enabled') !== 'false'; } catch { /* Storage is optional. */ }
   audio.volume = 0.25;
+  document.addEventListener('referee-speaking', event => { audio.volume = event.detail ? 0.07 : 0.25; });
   function render() {
     toggle.checked = enabled;
   }
