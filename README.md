@@ -61,10 +61,10 @@ npm run certs             # includes every current LAN address in the certificat
 npm start
 ```
 
-`npm start` prints the exact URL. With this laptop’s current address it is:
+`npm start` prints the exact URL using this laptop’s current address, for example:
 
 ```text
-https://10.5.60.135:8443/client-phone/
+https://192.168.1.25:8443/client-phone/
 ```
 
 If you use a QR code, encode that exact HTTPS LAN URL. Do not encode the link from a laptop page opened at `http://localhost:8443`; a phone resolves `localhost` to itself, so it cannot reach the laptop. The current build has a phone link but does not create a QR code automatically.
@@ -95,7 +95,7 @@ The server is authoritative at 120 Hz and broadcasts state at 60 Hz.
 
 ## Manual balls, gentler swings, and camera position
 
-Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing or press Space. After each shot, the ball clears and waits for another button press. The spawn request is a same-origin POST to `/api/spawn`; the existing WebSocket message fields remain unchanged. Phones now receive the state message too, and laptops receive the existing pose message echoed by the server.
+Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing or press Space. After each shot, the ball clears and waits for another button press. Spawn requests travel over the seat-attributed WebSocket. Phones receive their assigned seat and shared state, while laptops receive the opponent’s pose.
 
 Phone motion needs a 2.5g start and a 600ms quiet recovery. Pitch has less influence, upward launch speed is capped at 3.8m/s, and power saturates at 11m/s. These values live in `shared/config.js`. Tap **Use defaults** on the phone to clear an old personal calibration.
 

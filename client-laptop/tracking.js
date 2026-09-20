@@ -23,9 +23,10 @@ export function setupTracking({ onPose }) {
       if (video.readyState >= 2 && video.currentTime !== lastFrame) {
         lastFrame = video.currentTime;
         const result = model.detectForVideo(video, performance.now());
-        const pose = tracker.update(result.landmarks?.[0]);
+        const pose = tracker.update(result.landmarks?.[0], performance.now());
+        onPose(pose, tracker.state());
         if (pose) {
-          onPose(pose); label.textContent = 'You · tracking';
+          label.textContent = 'You · tracking';
           status.textContent = 'Tracking your position. Step sideways or toward/away from the camera. Depth is approximate.';
         } else if (!tracker.reference && tracker.samples.length) {
           status.textContent = `Stand still: calibrating ${tracker.samples.length}/${CONFIG.tracking.calibrationFrames}.`;

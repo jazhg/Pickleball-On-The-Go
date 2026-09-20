@@ -9,6 +9,7 @@ const fields = {
   classification: ['t', 'type', 'shot', 'target_zone', 'confidence', 'path'],
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
   spawn: ['t', 'type'],
+  controller_pose: ['t', 'type', 'qx', 'qy', 'qz', 'qw'],
   hello: ['type', 'player', 'role'],
 };
 const SHOTS = new Set(['dink', 'drive', 'drop', 'lob', 'smash', 'serve', 'mishit']);
@@ -30,6 +31,7 @@ export function validMessage(msg) {
     classification: [],
     ruling_evidence: [],
     spawn: [],
+    controller_pose: [],
     hello: [],
   };
   const extras = Object.keys(msg).filter(key => !required.includes(key));
@@ -69,9 +71,20 @@ export function validMessage(msg) {
         && SHOTS.has(msg.preceding_shot.shot) && ZONES.has(msg.preceding_shot.target_zone)
         && finite(msg.preceding_shot.confidence)));
     case 'spawn': return finite(msg.t) && msg.t >= 0;
+    case 'controller_pose': {
+      if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;
+      const lengthSquared = msg.qx ** 2 + msg.qy ** 2 + msg.qz ** 2 + msg.qw ** 2;
+      return lengthSquared >= 1e-8 && lengthSquared <= 1e8;
+    }
     case 'hello': return ['A', 'B'].includes(msg.player) && typeof msg.role === 'string';
     default: return false;
   }
+}
+export function normalizeControllerPose(msg) {
+  if (!validMessage(msg) || msg.type !== 'controller_pose') return null;
+  const length = Math.hypot(msg.qx, msg.qy, msg.qz, msg.qw);
+  if (!Number.isFinite(length) || length < 1e-4) return null;
+  return { ...msg, qx: msg.qx / length, qy: msg.qy / length, qz: msg.qz / length, qw: msg.qw / length };
 }
 export function parseMessage(data) {
   try { const msg = JSON.parse(String(data)); return validMessage(msg) ? msg : null; }

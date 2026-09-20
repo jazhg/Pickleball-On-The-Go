@@ -39,7 +39,9 @@ test('relay accepts seat-attributed laptop and phone input and protects private 
   let laptop;
   let phone;
   try {
-    assert.equal((await fetch(`${endpoint}/health`)).status, 200);
+    const healthResponse = await fetch(`${endpoint}/health`);
+    assert.equal(healthResponse.status, 200);
+    assert.ok(Array.isArray((await healthResponse.json()).phone_urls));
     for (const file of ['.env', '.certs/key.pem', 'server/index.js', 'shared/%2e%2e/%2e%2e/.env']) {
       assert.equal((await fetch(`${endpoint}/${file}`)).status, 404);
     }
@@ -125,5 +127,29 @@ test('explicit duplicate seats are rejected before the WebSocket upgrade', async
     second?.close();
     first?.close();
     await relay.close();
+  }
+});
+
+test('controller poses are normalized, rate limited, and paired to the matching laptop only', async () => {
+  const relay = await createRelay({ insecure: true, port: 0 });
+  const port = relay.server.address().port;
+  let laptopA, laptopB, phoneA;
+  try {
+    laptopA = (await openClient(`ws://127.0.0.1:${port}/ws?role=laptop&seat=A`)).ws;
+    laptopB = (await openClient(`ws://127.0.0.1:${port}/ws?role=laptop&seat=B`)).ws;
+    phoneA = (await openClient(`ws://127.0.0.1:${port}/ws?role=phone&seat=A`)).ws;
+    const match = waitForMessage(laptopA, message => message.type === 'controller_pose');
+    const wrongSeat = waitForMessage(laptopB, message => message.type === 'controller_pose', 150);
+    phoneA.send(JSON.stringify({ t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 2 }));
+    assert.equal((await match).qw, 1);
+    await assert.rejects(wrongSeat, /timed out/);
+
+    const received = [];
+    laptopA.on('message', payload => { const message = JSON.parse(String(payload)); if (message.type === 'controller_pose') received.push(message); });
+    for (let i = 0; i < 20; i++) phoneA.send(JSON.stringify({ t: i + 2, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 }));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.ok(received.length < 20, 'rapid controller flood is limited');
+  } finally {
+    phoneA?.close(); laptopB?.close(); laptopA?.close(); await relay.close();
   }
 });

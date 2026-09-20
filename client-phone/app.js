@@ -9,6 +9,7 @@ const ui = {
   state: $('reading-state'), peak: $('reading-peak'), pitch: $('reading-pitch'), roll: $('reading-roll'), yaw: $('reading-yaw'), gravity: $('reading-gravity'),
   calibrationBadge: $('calibration-badge'), calibrationDetail: $('calibration-detail'), calibrate: $('calibrate-button'), skip: $('skip-button'),
   soft: $('practice-soft'), medium: $('practice-medium'), hard: $('practice-hard'), synthetic: $('synthetic-button'), sendBadge: $('send-badge'), sendDetail: $('send-detail'),
+  recenter: $('recenter-button'),
 };
 const detector = new SwingDetector(CONFIG);
 let socket;
@@ -26,6 +27,9 @@ let ballPhase = null;
 let localPlayer = null;
 let readyFor = null;
 let lastHitter = null;
+let latestOrientation = null;
+let neutralOrientation = null;
+let controllerTimer = null;
 const spawnButton = $('spawn-button');
 function canSwingNow() {
   if (!localPlayer) return false;
@@ -154,19 +158,27 @@ async function enableMotion() {
     setPermissionError('Safari will not grant motion access over plain HTTP. Open the https:// LAN URL from the server terminal.');
     return;
   }
-  if (!('DeviceMotionEvent' in window)) {
-    setPermissionError('This browser does not expose DeviceMotionEvent. Use Safari on iOS or Chrome on Android.');
+  if (!('DeviceMotionEvent' in window) && !('DeviceOrientationEvent' in window)) {
+    setPermissionError('This browser does not expose motion or orientation sensors. The neutral paddle and keyboard controls remain available.');
     return;
   }
   try {
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      const permission = await DeviceMotionEvent.requestPermission();
+    if (typeof window.DeviceMotionEvent?.requestPermission === 'function') {
+      const permission = await window.DeviceMotionEvent.requestPermission();
       if (permission !== 'granted') { setPermissionError(`Motion permission was ${permission}. Tap Enable motion again after allowing it in Safari.`); return; }
     }
+    if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
+      const permission = await window.DeviceOrientationEvent.requestPermission();
+      if (permission !== 'granted') { setPermissionError(`Orientation permission was ${permission}. The paddle will stay in its neutral rotation.`); }
+    }
     if (!motionStarted) {
-      window.addEventListener('devicemotion', onMotion, { passive: true });
+      if ('DeviceMotionEvent' in window) window.addEventListener('devicemotion', onMotion, { passive: true });
+      if ('DeviceOrientationEvent' in window) window.addEventListener('deviceorientation', onOrientation, { passive: true });
       motionStarted = true;
+      clearInterval(controllerTimer);
+      controllerTimer = setInterval(sendControllerPose, 1000 / CONFIG.network.controllerHz);
       ui.enable.textContent = 'Motion access enabled ✓'; ui.enable.disabled = true;
+      ui.recenter.disabled = false;
       ui.sensorDetail.textContent = 'Hold the phone still for about one second, then swing with the phone as your paddle face.';
       clearInterval(sensorTimer); sensorTimer = setInterval(() => {
         if (motionStarted && lastSensorAt && performance.now() - lastSensorAt > CONFIG.swing.sensorTimeoutMs) {
@@ -176,6 +188,51 @@ async function enableMotion() {
       }, 1000);
     }
   } catch (error) { setPermissionError(`Safari did not grant motion access: ${error?.message || 'permission request failed'}.`); }
+}
+
+const multiplyQuaternion = (a, b) => ({
+  x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+  y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+  z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+  w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+});
+function normalizeQuaternion(q) {
+  const length = Math.hypot(q.x, q.y, q.z, q.w);
+  return Number.isFinite(length) && length > 1e-5 ? { x: q.x / length, y: q.y / length, z: q.z / length, w: q.w / length } : null;
+}
+function axisQuaternion(x, y, z, angle) {
+  const half = angle / 2, s = Math.sin(half);
+  return { x: x * s, y: y * s, z: z * s, w: Math.cos(half) };
+}
+function orientationQuaternion(event) {
+  if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return null;
+  const platform = /iPad|iPhone|iPod/.test(navigator.userAgent) ? CONFIG.controller.ios : CONFIG.controller.android;
+  const rad = Math.PI / 180;
+  const alpha = event.alpha * platform.alpha * rad;
+  const beta = event.beta * platform.beta * rad;
+  const gamma = event.gamma * platform.gamma * rad;
+  // Equivalent to the established DeviceOrientationControls Y-X-Z mapping.
+  let q = multiplyQuaternion(axisQuaternion(0, 1, 0, alpha), axisQuaternion(1, 0, 0, beta));
+  q = multiplyQuaternion(q, axisQuaternion(0, 0, 1, -gamma));
+  q = multiplyQuaternion(q, axisQuaternion(1, 0, 0, -Math.PI / 2));
+  const screen = Number(screen.orientation?.angle ?? window.orientation ?? 0) * rad;
+  return normalizeQuaternion(multiplyQuaternion(q, axisQuaternion(0, 0, 1, -screen)));
+}
+function onOrientation(event) {
+  const q = orientationQuaternion(event);
+  if (!q) return;
+  latestOrientation = q;
+  if (!neutralOrientation) neutralOrientation = q;
+}
+function relativeOrientation(current, neutral) {
+  const inverse = { x: -neutral.x, y: -neutral.y, z: -neutral.z, w: neutral.w };
+  return normalizeQuaternion(multiplyQuaternion(inverse, current));
+}
+function sendControllerPose() {
+  if (!latestOrientation || !neutralOrientation || socket?.readyState !== WebSocket.OPEN) return;
+  const q = relativeOrientation(latestOrientation, neutralOrientation);
+  if (!q) return;
+  socket.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: q.x, qy: q.y, qz: q.z, qw: q.w }));
 }
 
 function onMotion(event) {
@@ -233,6 +290,7 @@ function sendSwing(swing, synthetic) {
 }
 
 ui.enable.addEventListener('click', enableMotion);
+ui.recenter.addEventListener('click', () => { if (latestOrientation) neutralOrientation = { ...latestOrientation }; });
 ui.calibrate.addEventListener('click', beginCalibration);
 ui.skip.addEventListener('click', () => {
   calibrationMode = false; calibration = null;
@@ -241,7 +299,16 @@ ui.skip.addEventListener('click', () => {
   ui.calibrationBadge.textContent = 'DEFAULT'; ui.calibrationBadge.className = 'small-badge'; ui.calibrationDetail.textContent = 'Using the gentler default soft / medium / hard mapping.';
 });
 ui.synthetic.addEventListener('click', () => sendSwing({ ...CONFIG.swing.synthetic }, true));
-window.addEventListener('pagehide', () => { closing = true; clearTimeout(reconnectTimer); clearInterval(sensorTimer); socket?.close(); });
-window.addEventListener('pageshow', event => { if (event.persisted) { closing = false; connect(); } });
+window.addEventListener('pagehide', () => { closing = true; clearTimeout(reconnectTimer); clearInterval(sensorTimer); clearInterval(controllerTimer); socket?.close(); });
+window.addEventListener('pageshow', event => {
+  if (event.persisted) {
+    closing = false;
+    if (motionStarted) {
+      clearInterval(controllerTimer);
+      controllerTimer = setInterval(sendControllerPose, 1000 / CONFIG.network.controllerHz);
+    }
+    connect();
+  }
+});
 
 setSecureStatus(); loadCalibration(); updateReadings(); connect();

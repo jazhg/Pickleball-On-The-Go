@@ -93,6 +93,9 @@ let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.homeDepth };
+let trackingRenderState = { wristOffset: { ...CONFIG.render.neutralPaddleOffset }, jumpHeight: 0 };
+let controllerPose = { qx: 0, qy: 0, qz: 0, qw: 1 };
+let phoneBaseURL = new URL('/client-phone/', location.href);
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
   spawnButton.disabled = true;
@@ -111,7 +114,31 @@ function updateMinimap(pose) {
   dot.setAttribute('cx', 50 + seatSign * pose.court_x / CONFIG.court.width * 94);
   dot.setAttribute('cy', 110 + seatSign * pose.court_y / CONFIG.court.length * 214);
 }
-setupTracking({ onPose(pose) {
+function updatePhoneLinks() {
+  const url = new URL(phoneBaseURL);
+  if (localPlayer) url.searchParams.set('seat', localPlayer);
+  document.querySelectorAll('.phone-link').forEach((link) => {
+    link.href = url.href;
+    if (link.matches('#transport-note a')) link.textContent = url.href;
+  });
+}
+async function discoverPhoneURL() {
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return;
+  try {
+    const response = await fetch('/health');
+    const health = await response.json();
+    if (Array.isArray(health.phone_urls) && health.phone_urls.length) {
+      phoneBaseURL = new URL(health.phone_urls[0]);
+      updatePhoneLinks();
+    }
+  } catch { /* Keep the current-origin fallback if LAN discovery is unavailable. */ }
+}
+setupTracking({ onPose(pose, trackingState) {
+  if (trackingState) {
+    trackingRenderState = trackingState;
+    court?.updateTracking(trackingState);
+  }
+  if (!pose) return;
   const signed = {
     ...pose,
     court_x: seatSign * pose.court_x,
@@ -257,12 +284,7 @@ function connect() {
       localPlayer = message.player;
       seatSign = localPlayer === 'A' ? 1 : -1;
       document.getElementById('seat-badge').textContent = `YOU ARE PLAYER ${localPlayer}`;
-      const phoneURL = new URL('/client-phone/', location.href);
-      phoneURL.searchParams.set('seat', localPlayer);
-      document.querySelectorAll('.phone-link').forEach((link) => {
-        link.href = phoneURL.href;
-        if (link.matches('#transport-note a')) link.textContent = phoneURL.href;
-      });
+      updatePhoneLinks();
       document.querySelectorAll('.player-label').forEach((label, index) => {
         label.classList.toggle('is-local', localPlayer === (index === 0 ? 'A' : 'B'));
       });
@@ -271,6 +293,10 @@ function connect() {
       return;
     }
     if (isState(message)) receiveState(message);
+    else if (message.type === 'controller_pose' && validMessage(message)) {
+      controllerPose = message;
+      court?.updateController(message);
+    }
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
     else if (message.type === 'ruling') receiveRuling(message);
     else if (message.type === 'classification') receiveClassification(message);
@@ -314,11 +340,10 @@ window.addEventListener('pageshow', (event) => {
   if (event.persisted) { closing = false; connect(); }
 });
 
-const phoneURL = new URL('/client-phone/', location.href);
 const phoneLink = document.createElement('a');
 phoneLink.className = 'phone-link';
-phoneLink.href = phoneURL.href;
-phoneLink.textContent = phoneURL.href;
+phoneLink.href = phoneBaseURL.href;
+phoneLink.textContent = phoneBaseURL.href;
 phoneLink.target = '_blank';
 phoneLink.rel = 'noopener';
 const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -337,6 +362,8 @@ ui['transport-note'].append('Phone setup: ', phoneLink, document.createTextNode(
   : location.protocol === 'https:'
     ? ' · Use this address on the same Wi-Fi. On iOS, install and fully trust the mkcert CA before enabling motion.'
     : ' · Phone motion needs HTTPS. Start the server with a trusted mkcert certificate, then open this address using https://.'));
+updatePhoneLinks();
+discoverPhoneURL();
 
 function createCourt(THREE) {
   const container = ui['court-canvas'];
@@ -359,6 +386,7 @@ function createCourt(THREE) {
   const camera = new THREE.PerspectiveCamera(90, 1, 0.05, 100);
   const cameraTarget = new THREE.Vector3(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
   camera.position.copy(cameraTarget);
+  scene.add(camera);
   scene.add(new THREE.HemisphereLight('#f8fff0', '#526d4e', 2.3));
   const sun = new THREE.DirectionalLight('#fff1cd', 3);
   sun.position.set(-8, 15, -5);
@@ -458,6 +486,37 @@ function createCourt(THREE) {
   playerRing.rotation.x = -Math.PI / 2;
   scene.add(playerRing);
 
+  // Camera-local first-person paddle. Geometry/materials are created once and the
+  // whole assembly inherits court movement and jump height from the camera.
+  const paddle = new THREE.Group();
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32), new THREE.MeshStandardMaterial({ color: '#dbe86b', roughness: 0.55, metalness: 0.03 }));
+  face.rotation.x = Math.PI / 2;
+  face.scale.set(0.92, 1, 1.22);
+  face.castShadow = true;
+  paddle.add(face);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 8, 32), new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7 }));
+  rim.scale.y = 1.22;
+  rim.castShadow = true;
+  paddle.add(rim);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.055), new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9 }));
+  handle.position.y = -0.28;
+  handle.castShadow = true;
+  paddle.add(handle);
+  const paddleTargetPosition = new THREE.Vector3(CONFIG.render.neutralPaddleOffset.x, CONFIG.render.neutralPaddleOffset.y, CONFIG.render.neutralPaddleOffset.z);
+  const paddleTargetQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+  paddle.position.copy(paddleTargetPosition);
+  camera.add(paddle);
+  function updateTracking(state) {
+    if (!state?.wristOffset || !Number.isFinite(state.jumpHeight)) return;
+    paddleTargetPosition.set(state.wristOffset.x, state.wristOffset.y, Math.min(-0.22, state.wristOffset.z));
+  }
+  function updateController(pose) {
+    if (!validMessage(pose)) return;
+    paddleTargetQuaternion.set(pose.qx, pose.qy, pose.qz, pose.qw).normalize();
+  }
+  updateTracking(trackingRenderState);
+  updateController(controllerPose);
+
   const opponentGroup = new THREE.Group();
   const opponentBody = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.9, 20), new THREE.MeshStandardMaterial({ color: '#d5e3ff', roughness: 0.7 }));
   opponentBody.position.y = 0.45;
@@ -529,10 +588,12 @@ function createCourt(THREE) {
   });
   resizeObserver.observe(container);
   renderer.setAnimationLoop(() => {
-    cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
+    cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight + trackingRenderState.jumpHeight, playerPosition.z);
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
+    paddle.position.lerp(paddleTargetPosition, CONFIG.render.paddlePositionAlpha);
+    paddle.quaternion.slerp(paddleTargetQuaternion, CONFIG.render.paddleRotationAlpha);
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
@@ -541,7 +602,7 @@ function createCourt(THREE) {
     showRenderError('The 3D graphics context was interrupted. Reload this page to reconnect the court.');
     updateControls();
   });
-  return { applyState, clearTrail, updateOpponent };
+  return { applyState, clearTrail, updateOpponent, updateTracking, updateController };
 }
 
 function showRenderError(message) {

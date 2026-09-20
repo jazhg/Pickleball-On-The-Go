@@ -54,8 +54,19 @@ export const CONFIG = Object.freeze({
     sensorTimeoutMs: 4000, // 2000–8000: report granted permission but no events.
     synthetic: { peak_g: 3.8, pitch: 14.2, roll: -6.1, yaw_rate: 220, duration_ms: 310 },
   },
+  dtw: {
+    minSamples: 8, maxSamples: 180, // 8–18 / 120–240: valid motion trace bounds.
+    minDurationMs: 80, maxDurationMs: 1400, // 60–150 / 900–1800: deliberate swing window.
+    points: 32, bandRatio: 0.25, // 24–48 points; 0.15–0.35 local time-warp allowance.
+    minAccelerationRms: 0.08, // 0.04–0.2g: reject empty/noise-only traces.
+    maxDistance: 0.72, minMargin: 0.12, // Physical playtest classification thresholds.
+  },
   render: {
     eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
+    paddlePositionAlpha: 0.24, // 0.12–0.4: higher follows the wrist faster but admits more jitter.
+    paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
+    neutralPaddleOffset: { x: 0.42, y: -0.34, z: -0.62 }, // Camera-local metres; z stays in front of the near plane.
+    maxWristOffset: { x: 0.42, y: 0.38, z: 0.22 }, // 0.2–0.6 m per axis: clamp landmark noise to the visible view.
   },
   tracking: {
     version: '0.10.21',
@@ -66,14 +77,30 @@ export const CONFIG = Object.freeze({
     shoulderMeters: 0.42, // 0.35–0.55: approximate physical shoulder width.
     referenceDistance: 2.5, // 1.5–4 m: assumed distance at calibration; depth is a proxy.
     positionAlpha: 0.2, // 0.1–0.35: smooth camera position estimates.
+    movementDeadZone: 0.035, // 0.015–0.08 m: ignore stationary court-position jitter.
     minDepth: 2.6, maxDepth: 6.1, // Stay on your side of the court.
     edgeMargin: 0.35, // 0.2–0.6 m: avoid placing the player on the sideline.
     markerRadius: 0.35, // 0.2–0.5 m: ground-position circle size.
+    wristVisibility: 0.55, // 0.4–0.75: minimum confidence for wrist-relative paddle input.
+    wristLossTimeoutMs: 450, // 250–1000 ms: hold the last reliable wrist before returning neutral.
+    wristReturnAlpha: 0.1, // 0.05–0.25 per tracking tick: neutral return after a longer loss.
+    jumpThreshold: 0.14, // 0.08–0.25 body lengths above baseline before confirming a jump.
+    jumpConfirmationFrames: 3, // 2–5 frames: reject isolated raised-hip spikes.
+    verticalDeadZone: 0.045, // 0.02–0.08 body lengths: suppress breathing/camera noise.
+    verticalAlpha: 0.22, // 0.1–0.4 per tracking tick: smooth POV rise and landing.
+    maxPovRise: 0.65, // 0.35–0.9 m: maximum render-only upward camera displacement.
   },
   network: {
     port: 8443, reconnectMs: 1500, // 500–5000: browser reconnect delay.
     maxPayloadBytes: 2048, minSwingIntervalMs: 180, // 100–250: relay flood protection.
+    controllerHz: 25, // 20–30 Hz: low-latency orientation updates without raw-event flooding.
+    controllerRateBurst: 3, // 2–5: short scheduling burst tolerated by the relay limiter.
     heartbeatMs: 15000, // 10000–30000: close abandoned sockets.
+  },
+  controller: {
+    // Euler sign hooks for device-specific playtesting; orientation uses Z-X-Y conversion.
+    ios: { alpha: 1, beta: 1, gamma: 1 },
+    android: { alpha: 1, beta: 1, gamma: 1 },
   },
   nemotron: {
     bridgeScript: 'nemotron/bridge.py', // spawned as: python3 <bridgeScript>

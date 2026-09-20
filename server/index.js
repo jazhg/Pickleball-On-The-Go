@@ -7,7 +7,8 @@ import { networkInterfaces } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, WebSocket } from 'ws';
 import { CONFIG } from '../shared/config.js';
-import { parseMessage } from '../shared/protocol.js';
+import { normalizeControllerPose, parseMessage } from '../shared/protocol.js';
+import { parseAnalysis } from '../shared/shot-telemetry.js';
 import { Simulation } from './physics.js';
 import { adjudicateRally, classifySwing, validateRulingForApply } from './nemotron-bridge.js';
 
@@ -67,9 +68,14 @@ export function describeEvents(fixtureEvents) {
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const lanAddresses = () => Object.values(networkInterfaces())
+  .flatMap(addresses => addresses || [])
+  .filter(address => address.family === 'IPv4' && !address.internal)
+  .map(address => address.address);
 export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
   const sim = new Simulation();
   let lastClassification = null; // most recent shot, for the evidence panel
+  let lastShot = null, nextShotId = 1;
   const sendToLaptops = (obj) => {
     const text = JSON.stringify(obj);
     for (const client of hub.clients) {
@@ -83,7 +89,18 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     catch { res.writeHead(400, headers); return res.end('Invalid URL'); }
     if (pathname === '/health') {
       res.writeHead(200, { ...headers, 'Content-Type': MIME['.json'] });
-      return res.end(JSON.stringify({ ok: true, simulation_hz: CONFIG.simulation.hz, broadcast_hz: CONFIG.simulation.broadcastHz }));
+      const scheme = insecure ? 'http' : 'https';
+      const activePort = req.socket.localPort || port;
+      const phone_urls = lanAddresses().map(address => `${scheme}://${address}:${activePort}/client-phone/`);
+      return res.end(JSON.stringify({ ok: true, simulation_hz: CONFIG.simulation.hz, broadcast_hz: CONFIG.simulation.broadcastHz, phone_urls }));
+    }
+    if (pathname === '/api/spawn' && req.method === 'POST') {
+      let sameOrigin = false;
+      try { sameOrigin = new URL(req.headers.origin).host === req.headers.host; } catch { /* Require a browser same-origin request. */ }
+      if (!sameOrigin) { res.writeHead(405, headers); return res.end(); }
+      sim.spawn('A');
+      res.writeHead(200, { ...headers, 'Content-Type': MIME['.json'] });
+      return res.end(JSON.stringify({ ok: true }));
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); return res.end(); }
     if (pathname === '/') { res.writeHead(302, { ...headers, Location: '/client-laptop/' }); return res.end(); }
@@ -141,23 +158,63 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   });
   hub.on('connection', ws => {
     ws.isAlive = true; ws.lastSwing = -Infinity;
+    ws.controllerTokens = CONFIG.network.controllerRateBurst;
+    ws.controllerRefillAt = performance.now();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('error', () => {});
     const seat = ws.player || 'A';
     ws.send(JSON.stringify({ type: 'hello', player: seat, role: ws.role }));
     ws.send(JSON.stringify(sim.state(seat)));
+    if (ws.role === 'laptop' && lastShot) ws.send(JSON.stringify(lastShot));
     const opponentPose = sim.players[seat === 'A' ? 'B' : 'A'];
     if (opponentPose) ws.send(JSON.stringify({ ...opponentPose, type: 'pose' }));
     ws.on('message', (data, binary) => {
       if (binary) return;
+      const analysisMessage = parseAnalysis(data);
+      if (analysisMessage) {
+        const pending = ws.pendingShot;
+        if (!pending || pending.t !== analysisMessage.t || pending.analysis !== null) return;
+        pending.analysis = analysisMessage.analysis;
+        lastShot = pending;
+        sendToLaptops(pending);
+        return;
+      }
       const msg = parseMessage(data);
       if (!msg) return;
-      if (msg.type === 'swing') {
+      if (msg.type === 'controller_pose') {
+        if (ws.role !== 'phone') return;
+        const now = performance.now();
+        ws.controllerTokens = Math.min(CONFIG.network.controllerRateBurst,
+          ws.controllerTokens + (now - ws.controllerRefillAt) * CONFIG.network.controllerHz / 1000);
+        ws.controllerRefillAt = now;
+        if (ws.controllerTokens < 1) return;
+        ws.controllerTokens -= 1;
+        const pose = normalizeControllerPose(msg);
+        if (!pose) return;
+        const text = JSON.stringify(pose);
+        for (const client of hub.clients) {
+          if (client.role !== 'laptop' || client.player !== ws.player || client.readyState !== WebSocket.OPEN || client.bufferedAmount >= 65536) continue;
+          client.send(text);
+        }
+      } else if (msg.type === 'swing') {
         const now = performance.now();
         if (now - ws.lastSwing < CONFIG.network.minSwingIntervalMs) return;
         ws.lastSwing = now;
         const seat = ws.player || 'A';
+        const phaseBefore = sim.phase;
         const accepted = sim.swing(msg, seat);
+        const horizontal = accepted ? Math.hypot(sim.ball.vx, sim.ball.vz) : 0;
+        const shot = {
+          type: 'shot', id: nextShotId++, t: msg.t, source: ws.role, accepted,
+          reason: accepted ? 'contact' : phaseBefore === 'idle' ? 'no_ball' : phaseBefore === 'ready' ? 'missed' : 'busy',
+          swing: msg,
+          launch_speed_mps: accepted ? Math.hypot(sim.ball.vx, sim.ball.vy, sim.ball.vz) : null,
+          launch_angle_deg: accepted ? Math.atan2(sim.ball.vy, horizontal) * 180 / Math.PI : null,
+          analysis: null,
+        };
+        ws.pendingShot = shot;
+        lastShot = shot;
+        sendToLaptops(shot);
         if (accepted) {
           // Physics launches immediately; classification runs async and must never
           // block the 120 Hz sim loop. The bridge always resolves (fallback included).
@@ -258,7 +315,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(`Pickleball M1 · authoritative ${CONFIG.simulation.hz}Hz / state ${CONFIG.simulation.broadcastHz}Hz`);
     console.log(`Laptop: ${scheme}://localhost:${port}/client-laptop/`);
     if (insecure) console.log('Keyboard-only localhost mode. Use npm start with mkcert certificates for phone + LAN.');
-    else for (const list of Object.values(networkInterfaces())) for (const address of list || []) if (address.family === 'IPv4' && !address.internal) console.log(`Phone / LAN: ${scheme}://${address.address}:${port}/client-phone/`);
+    else for (const address of lanAddresses()) console.log(`Phone / LAN: ${scheme}://${address}:${port}/client-phone/`);
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await relay.close(); process.exit(0); });
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
