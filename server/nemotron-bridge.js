@@ -96,3 +96,8 @@ export function validateRulingForApply(ruling, currentScore) {
   }
   return ruling;
 }
+
+// Coaching is bounded to one caller at a time by the relay; never mutates scores.
+export async function coachRally(events, ruling) {
+  return runBridge({ op: 'coach', events, ruling }, { timeoutMs: 9000 });
+}

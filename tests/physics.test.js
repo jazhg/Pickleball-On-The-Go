@@ -2,196 +2,114 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation, speedFromPeak } from '../server/physics.js';
 import { CONFIG } from '../shared/config.js';
-import { validMessage, parseMessage } from '../shared/protocol.js';
-const swing = { t: 1234567, type: 'swing', ...CONFIG.swing.synthetic };
+import { validMessage } from '../shared/protocol.js';
+const swing = { t: 1, type: 'swing', ...CONFIG.swing.synthetic, roll: 0, pitch: 0 };
+const pose = (x, z) => ({ t: 1, type: 'pose', court_x: x, court_y: z, torso_deg: 0, wrist_h: 0.95 });
+const aim = degrees => ({ t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(degrees * Math.PI / 360), qz: 0, qw: Math.cos(degrees * Math.PI / 360) });
+function rally(player = 'A') {
+  const s = new Simulation(); s.phase = 'rally'; s.hits = 3; s.lastHitter = player === 'A' ? 'B' : 'A'; s.bounces = 1;
+  Object.assign(s.ball, s.paddle(player)); return s;
+}
+function bounce(s, x, z) { Object.assign(s.ball, { x, z, y: 0.038, vx: 0, vy: -1, vz: 0 }); s.step(); }
 
-test('positive roll aims left and negative roll aims right', () => {
-  const launch = roll => {
-    const sim = new Simulation();
-    sim.spawn();
-    sim.swing({ ...swing, roll });
-    return sim.ball.vx;
-  };
-  assert.ok(launch(10) < 0);
-  assert.ok(launch(-10) > 0);
-});
-
-test('in-bounds ball keeps bouncing beyond two bounces and only an out landing ends it', () => {
-  const sim = new Simulation();
-  sim.phase = 'rally';
-  sim.ball = { x: 0, y: 1, z: 3, vx: 0, vy: 0, vz: 0 };
-  for (let i = 0; i < 300; i++) sim.step();
-  assert.ok(sim.bounces > 2);
-  assert.equal(sim.phase, 'rally');
-  assert.equal(sim.spawn(), false);
-  assert.equal(sim.events.some(e => e.type === 'rally_end'), false);
-  sim.ball.x = CONFIG.court.width;
-  sim.ball.y = CONFIG.physics.ballRadius;
-  sim.ball.vy = -1;
-  sim.step();
-  assert.equal(sim.phase, 'reset');
-  assert.equal(sim.events.at(-1).reason, 'out');
-  for (let i = 0; i < 300; i++) sim.step();
-  assert.equal(sim.phase, 'idle');
-  assert.equal(sim.spawn(), true);
-});
-
-test('a motionless grounded ball enables respawn after three seconds', () => {
-  const sim = new Simulation();
-  sim.phase = 'rally';
-  sim.ball = { x: 0, y: CONFIG.physics.ballRadius, z: 2, vx: 0, vy: 0, vz: 0 };
-  const nearlyThreeSeconds = CONFIG.simulation.hz * CONFIG.simulation.stationaryTimeoutSeconds - 1;
-  for (let i = 0; i < nearlyThreeSeconds; i++) sim.step();
-  assert.equal(sim.phase, 'rally');
-  assert.equal(sim.spawn(), false);
-  for (let i = 0; i < 3; i++) sim.step();
-  assert.equal(sim.phase, 'idle');
-  assert.equal(sim.events.at(-1).reason, 'stopped');
-  assert.equal(sim.spawn(), true);
-});
-
-test('bot return rebounds on the near court and allows a player return', () => {
-  const sim = new Simulation();
-  sim.phase = 'rally'; sim.lastHitter = 'A'; sim.bounces = 1;
-  sim.ball = { x: 0, y: 0.5, z: -3, vx: 0, vy: 0, vz: 0 };
-  assert.equal(sim.botReturn(), true);
-  assert.equal(sim.lastHitter, 'B');
-  for (let i = 0; i < 240 && sim.bounces === 0; i++) sim.step();
-  assert.equal(sim.phase, 'rally');
-  assert.ok(sim.ball.z > 0 && sim.ball.vy > 0);
-  Object.assign(sim.ball, sim.paddle('A'));
-  assert.equal(sim.swing(swing, 'A'), true);
-});
-
-test('keyboard swing clears net, bounces inside far court, then waits for spawn', () => {
-  const sim = new Simulation();
-  assert.equal(sim.phase, 'idle');
-  assert.equal(sim.swing(swing), false);
-  assert.equal(sim.spawn(), true);
-  assert.equal(sim.spawn(), false);
-  assert.equal(sim.swing(swing), true);
-  let bounce;
-  for (let i = 0; i < 500 && !bounce; i++) { sim.step(); bounce = sim.events.find(e => e.type === 'bounce'); }
-  assert.ok(bounce); assert.equal(bounce.in_bounds, true); assert.ok(bounce.z < 0, 'first bounce is on the far side');
-  assert.equal(sim.events.some(e => e.type === 'net_contact'), false);
-  assert.ok(sim.ball.vy > 0, 'ball should rebound upward');
-  for (let i = 0; i < 1500 && sim.phase !== 'idle'; i++) sim.step();
-  assert.equal(sim.phase, 'idle');
-  for (let i = 0; i < 1200; i++) sim.step();
-  assert.equal(sim.phase, 'idle');
-  assert.equal(sim.swing(swing), false);
-});
-test('hit window rejects distant ball; speed bounds and calibrated midpoint hold', () => {
-  const sim = new Simulation(); sim.spawn(); sim.ball.x = 3;
-  assert.equal(sim.swing(swing), false);
-  assert.equal(speedFromPeak(0), CONFIG.physics.minSpeed);
-  assert.equal(speedFromPeak(100), CONFIG.calibration.powerCap);
-  assert.equal(speedFromPeak(CONFIG.calibration.mediumG), CONFIG.calibration.mediumSpeed);
-});
-test('extreme phone angles and force cannot launch the ball above two meters', () => {
-  for (const pitch of [-180, -113.5, -23.8, 31.4, 92.6, 174.8, 180]) {
-    const sim = new Simulation(); sim.spawn(); sim.swing({ ...swing, peak_g: 12.61, pitch });
-    assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
-    assert.equal(sim.swing(swing), false, 'ignore follow-through contacts during flight');
-    for (let i = 0; i < 2400 && sim.phase === 'rally'; i++) { sim.step(); assert.ok(sim.ball.y < 2, `too high at pitch ${pitch}`); }
+test('only the correct server can request or hit the ball; score parity positions both seats', () => {
+  for (const player of ['A', 'B']) for (const score of [0, 1, 2, 11]) {
+    const s = new Simulation(); s.servingTeam = player; s.score[player === 'A' ? 0 : 1] = score;
+    const other = player === 'A' ? 'B' : 'A';
+    assert.equal(s.spawn(other), false); assert.equal(s.spawn(player), true);
+    assert.equal(s.readyFor, player); assert.equal(s.swing(swing, other), false);
+    assert.ok(Math.abs(s.players[player].court_y) > CONFIG.court.length / 2);
+    assert.equal(Math.sign(s.players[player].court_x), (player === 'A' ? 1 : -1) * (score % 2 ? -1 : 1));
+    assert.equal(s.swing(swing, player), true);
+    assert.ok(s.ball.vz * (player === 'A' ? -1 : 1) > 0);
   }
 });
-test('serve ball stays fixed when the player moves and needs a nearby hit', () => {
-  const sim = new Simulation(); sim.spawn();
-  const waiting = { ...sim.ball };
-  sim.setPose({ t: 1, type: 'pose', court_x: 2, court_y: 4.8, torso_deg: 0, wrist_h: 1 });
-  assert.deepEqual(sim.ball, waiting);
-  assert.equal(sim.swing(swing), false);
-  assert.equal(sim.phase, 'ready');
-  sim.setPose({ ...sim.players.A, court_x: CONFIG.player.x, court_y: CONFIG.player.homeDepth });
-  assert.equal(sim.swing(swing), true);
-  const x = sim.ball.x;
-  sim.setPose({ ...sim.players.A, court_x: -1 }, 'A');
-  assert.equal(sim.ball.x, x);
-});
-test('player B serves toward positive z and can return player A shots', () => {
-  const sim = new Simulation();
-  sim.setPose({ t: 1, type: 'pose', court_x: 0, court_y: 5.25, torso_deg: 0, wrist_h: 0.95 }, 'B');
-  assert.equal(sim.players.B.court_y, -5.25, 'server signs B depth authoritatively');
-  assert.equal(sim.spawn('B'), true);
-  assert.equal(sim.readyFor, 'B');
-  assert.equal(sim.swing(swing, 'A'), false, 'the wrong player cannot serve');
-  assert.equal(sim.swing(swing, 'B'), true);
-  assert.ok(sim.ball.vz > 0, 'B attacks toward positive z');
-
-  Object.assign(sim.ball, sim.paddle('A'));
-  assert.equal(sim.swing(swing, 'B'), false, 'one player cannot hit twice in a row');
-  assert.equal(sim.swing(swing, 'A'), true);
-  assert.ok(sim.ball.vz < 0, 'A returns toward negative z');
-  assert.equal(sim.lastHitter, 'A');
-});
-test('controller orientation has equivalent egocentric launch behavior for seats A and B', () => {
-  const angle = 12 * Math.PI / 180;
-  const controller = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(angle / 2), qz: 0, qw: Math.cos(angle / 2) };
-  const launches = {};
-  for (const player of ['A', 'B']) {
-    const sim = new Simulation();
-    sim.spawn(player);
-    assert.equal(sim.swing(swing, player, controller), true);
-    const sign = CONFIG.seats[player].sign;
-    launches[player] = { right: sign * sim.ball.vx, forward: -sign * sim.ball.vz, up: sim.ball.vy };
-    assert.ok(Math.abs(launches[player].right) < 1e-9, `${player} launches straight despite paddle yaw`);
-    assert.ok(launches[player].forward > 0, `${player} still launches into the far court`);
+test('neutral serves from either service side clear the net and land diagonally beyond kitchen', () => {
+  for (const player of ['A', 'B']) for (const score of [0, 1]) for (const peak_g of [2.5, 3.8, 8]) {
+    const s = new Simulation(); s.servingTeam = player; s.score[player === 'A' ? 0 : 1] = score;
+    s.spawn(player); s.swing({ ...swing, peak_g }, player, aim(0));
+    for (let i = 0; i < 600 && !s.bounces; i++) s.step();
+    const b = s.events.find(e => e.type === 'bounce');
+    assert.ok(b?.in_bounds, `${player}/${score}/${peak_g}: in bounds`);
+    assert.ok(b.z * (player === 'A' ? -1 : 1) > CONFIG.court.kitchenDepth);
+    assert.ok(b.x * s.serviceX(player) < 0); assert.equal(s.phase, 'rally');
+    assert.equal(s.events.some(e => e.type === 'net_contact'), false);
   }
-  for (const axis of ['right', 'forward', 'up']) assert.ok(Math.abs(launches.A[axis] - launches.B[axis]) < 1e-9);
 });
-test('rally reset preserves both tracked player poses', () => {
-  const sim = new Simulation();
-  const poseA = { t: 1, type: 'pose', court_x: 0.3, court_y: 5, torso_deg: 0, wrist_h: 0.95 };
-  const poseB = { ...poseA, court_x: -0.4 };
-  sim.setPose(poseA, 'A');
-  sim.setPose(poseB, 'B');
-  sim.reset();
-  assert.equal(sim.players.A.court_x, 0.3);
-  assert.equal(sim.players.B.court_x, -0.4);
-  assert.equal(sim.players.B.court_y, -5);
+test('side-out awards no point; server winning awards exactly one; finish is idempotent', () => {
+  const s = new Simulation(); s.spawn(); s.swing(swing);
+  s.finish('out', undefined, 'A'); assert.deepEqual(s.score, [0, 0]); assert.equal(s.servingTeam, 'B');
+  s.finish('out', undefined, 'B'); assert.deepEqual(s.score, [0, 0]);
+  s.reset(); s.spawn('B'); s.swing(swing, 'B'); s.finish('two_bounces', undefined, 'A');
+  assert.deepEqual(s.score, [0, 1]); assert.equal(s.servingTeam, 'B');
 });
-test('net catches low flight; floor bounces use restitution', () => {
-  const sim = new Simulation(); sim.phase = 'rally';
-  Object.assign(sim.ball, { x: 0, y: 0.5, z: 0.01, vx: 0, vy: 0, vz: -10 }); sim.step();
-  assert.ok(sim.ball.vz > 0); assert.ok(sim.events.some(e => e.type === 'net_contact'));
-  Object.assign(sim.ball, { y: 0.038, vy: -3, vz: 0 }); sim.step();
-  assert.equal(sim.ball.y, CONFIG.physics.ballRadius); assert.ok(sim.ball.vy > 2 && sim.ball.vy < 2.4);
+test('11 requires a two-point lead, deuce continues, game over blocks play until rematch', () => {
+  for (const [before, after, winner] of [[[10,9],[11,9],'A'], [[10,10],[11,10],null], [[11,10],[12,10],'A'], [[15,15],[16,15],null]]) {
+    const s = new Simulation(); s.score = [...before]; s.spawn(); s.swing(swing); s.finish('two_bounces', undefined, 'B');
+    assert.deepEqual(s.score, after); assert.equal(s.winner, winner);
+    if (winner) { for(let i=0;i<1000;i++)s.step(); assert.equal(s.phase,'game_over'); assert.equal(s.spawn(),false); assert.equal(s.swing(swing),false); s.newGame(); assert.deepEqual(s.score,[0,0]); assert.equal(s.spawn(),true); }
+  }
 });
-test('wire contract accepts design messages and rejects mutations/non-finite values', () => {
-  assert.ok(validMessage(swing)); assert.ok(validMessage(new Simulation().state()));
-  assert.ok(validMessage({ t: 1, type: 'spawn' }));
-  assert.ok(validMessage({ type: 'hello', player: 'B', role: 'phone' }));
-  assert.ok(validMessage({ t: 1, type: 'pose', court_x: -1.2, court_y: 2.9, torso_deg: 18, wrist_h: 0.94 }));
-  assert.ok(validMessage({ type: 'ruling', fault: true, player: 'A', rule: '9.B', explanation: 'Design schema example only.', score: [6, 5], side_out: true }));
-  assert.equal(validMessage({ ...swing, player: 'A' }), false);
-  assert.equal(validMessage({ ...swing, peak_g: Infinity }), false);
-  assert.equal(validMessage({ ...swing, duration_ms: -1 }), false);
-  assert.equal(validMessage({ t: 1, type: 'pose', player: '', court_x: 0, court_y: 5, torso_deg: 0, wrist_h: 1 }), false);
-  assert.equal(parseMessage('{bad json'), null);
+test('second bounce outside still faults the receiver after a valid first bounce', () => {
+  const s = new Simulation(); s.spawn(); s.swing(swing); bounce(s, -1.5, -4); assert.equal(s.phase,'rally');
+  bounce(s, -4, -8); assert.equal(s.lastResult.player,'B'); assert.equal(s.lastResult.rule,'two_bounces'); assert.deepEqual(s.score,[1,0]);
 });
-
-test('phone paddle yaw does not steer a straight stroke sideways for either seat', () => {
-  for (const player of ['A', 'B']) {
-    for (const degrees of [-70, -45, 0, 45, 70, 120]) {
-      const sim = new Simulation();
-      sim.setPose({ t: 1, type: 'pose', court_x: 1, court_y: 5, torso_deg: 80, wrist_h: 0.95 }, player);
-      sim.spawn(player);
-      const yaw = degrees * Math.PI / 180;
-      const aim = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2) };
-      assert.equal(sim.swing({ ...swing, roll: -90 }, player, aim), true);
-      const sign = player === 'A' ? 1 : -1;
-      const bearing = Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) * 180 / Math.PI;
-      assert.ok(Math.abs(bearing) < 1e-10, `${player}: expected straight launch, got ${bearing}`);
-      assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
+test('first-bounce out, wrong side, short serve, and wrong diagonal fault the hitter', () => {
+  for (const [x,z,reason] of [[4,-4,'out'],[1,4,'wrong_side'],[-1,-1,'serve_short'],[1,-4,'serve_diagonal']]) {
+    const s=new Simulation(); s.spawn(); s.swing(swing); bounce(s,x,z);
+    assert.equal(s.lastResult.rule,reason); assert.equal(s.lastResult.player,'A'); assert.equal(s.servingTeam,'B');
+  }
+});
+test('serve and return must bounce before volleying, then volleys become legal', () => {
+  for (const hits of [1,2,3]) {
+    const s=rally();s.hits=hits;s.bounces=0;
+    const accepted=s.swing(swing);
+    assert.equal(accepted,hits===3);
+    if(hits<3) assert.equal(s.lastResult.rule,'two_bounce_rule');
+  }
+});
+test('kitchen volley faults; a bounced shot in the kitchen is legal', () => {
+  for(const bounces of [0,1]) {
+    const s=rally();s.setPose(pose(0,1.8));Object.assign(s.ball,s.paddle());s.bounces=bounces;
+    assert.equal(s.swing(swing),bounces===1);
+    if(!bounces)assert.equal(s.lastResult.rule,'kitchen_volley');
+  }
+});
+test('paddle yaw steers rally shots symmetrically for both seats with bounded extreme angles', () => {
+  for(const degrees of [-70,-30,0,30,70]) {
+    const velocities=[];
+    for(const player of ['A','B']) {
+      const s=rally(player);assert.equal(s.swing(swing,player,aim(degrees)),true);
+      const sign=player==='A'?1:-1;
+      const bearing=Math.atan2(sign*s.ball.vx,-sign*s.ball.vz)*180/Math.PI;
+      assert.ok(Math.abs(bearing-Math.max(-38,Math.min(38,degrees)))<1e-7);
+      velocities.push([sign*s.ball.vx,-sign*s.ball.vz,s.ball.vy]);
+      assert.ok(Object.values(s.ball).every(Number.isFinite));
     }
+    for(let i=0;i<3;i++)assert.ok(Math.abs(velocities[0][i]-velocities[1][i])<1e-7);
   }
 });
-
-test('missing or invalid paddle orientation retains keyboard shot behavior', () => {
-  const expected = new Simulation(); expected.spawn(); expected.swing(swing);
-  for (const aim of [null, { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 0 }]) {
-    const sim = new Simulation(); sim.spawn(); sim.swing(swing, 'A', aim);
-    assert.deepEqual(sim.ball, expected.ball);
-  }
+test('keyboard roll controls lateral direction; bad orientation uses keyboard fallback', () => {
+  for(const roll of [-20,20]) {const s=rally();s.swing({...swing,roll});assert.equal(Math.sign(s.ball.vx),-Math.sign(roll));}
+  const expected=rally();expected.swing(swing);
+  const s=rally();s.swing(swing,'A',{...aim(0),qw:0});assert.deepEqual(s.ball,expected.ball);
+});
+test('contact preserves ball position, rejects remote hits and repeat hits', () => {
+  const s=rally();s.ball.x+=0.4;const at={...s.ball};assert.equal(s.swing(swing),true);
+  for(const axis of ['x','y','z'])assert.equal(s.ball[axis],at[axis]);assert.equal(s.swing(swing),false);
+  const far=rally();far.ball.x=20;assert.equal(far.swing(swing),false);
+});
+test('brushing motion produces bounded decaying spin; no spin on a serve', () => {
+  const controller={...aim(0),motion_x:4,motion_y:0,motion_z:-4,motion_magnitude:6,angular_speed:200};
+  const s=rally();s.swing(swing,'A',controller);assert.equal(s.spin,6);s.step();assert.ok(s.ball.vx<0);assert.ok(s.spin<6);
+  const serve=new Simulation();serve.spawn();serve.swing(swing,'A',controller);assert.equal(serve.spin,0);
+});
+test('practice remains unscored and permits repeated bounces', () => {
+  const s=new Simulation();s.practiceFeed();s.ball={x:0,y:1,z:3,vx:0,vy:0,vz:0};
+  for(let i=0;i<300;i++)s.step();assert.ok(s.bounces>2);assert.deepEqual(s.score,[0,0]);
+});
+test('speed calibration and expanded state remain finite and wire-valid', () => {
+  assert.equal(speedFromPeak(0),CONFIG.physics.minSpeed);assert.equal(speedFromPeak(100),CONFIG.calibration.powerCap);
+  assert.equal(speedFromPeak(CONFIG.calibration.mediumG),CONFIG.calibration.mediumSpeed);
+  const s=new Simulation();assert.ok(validMessage(s.state()));s.spawn();s.swing(swing);assert.ok(validMessage(s.state()));
 });

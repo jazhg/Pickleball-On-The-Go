@@ -1,3 +1,4 @@
+import { BallInterpolation } from './ball-interpolation.js';
 import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
@@ -39,6 +40,7 @@ const ui = Object.fromEntries([
 
 // --- Nemotron HUD: classification, voice rulings, evidence, analytics ---
 let classifyTimer = null;
+let selectedCue = null;
 const analytics = { shots: {}, confSum: 0, confN: 0, rallies: 0, errors: 0 };
 
 
@@ -66,7 +68,7 @@ function receiveClassification(message) {
 function receiveRulingEvidence(message) {
   if (!validMessage(message)) return;
   ui['evidence-panel'].hidden = false;
-  ui['evidence-rule'].textContent = `Rule cited: ${message.rule}${message.provisional ? ' (provisional — not a reviewed rulebook citation)' : ''} · path: ${message.path}`;
+  ui['evidence-rule'].textContent = `Detected: ${message.rule.replace(/_/g, ' ')} · ${message.path === 'game_engine' ? 'authoritative game rules' : message.path}${message.provisional && message.path !== 'game_engine' ? ' (provisional)' : ''}`;
   ui['evidence-events'].replaceChildren(...message.trigger_events.map((e) => {
     const li = document.createElement('li');
     li.textContent = `${e.t}ms — ${e.label}`;
@@ -93,6 +95,7 @@ let launches = 0;
 let flashTimer;
 let rendererReady = false;
 let rendererFailed = false;
+let lastRawPose = null;
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.homeDepth };
 let trackingRenderState = {
   wristOffset: { ...CONFIG.tracking.neutralWristOffset },
@@ -109,9 +112,12 @@ const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
   spawnButton.disabled = true;
   if (socket?.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ t: Date.now(), type: 'spawn' }));
+    socket.send(JSON.stringify({ t: Date.now(), type: latestState?.phase === 'game_over' ? 'new_game' : 'spawn' }));
   }
   updateControls();
+});
+document.getElementById('coach-train').addEventListener('click', () => {
+  if (socket?.readyState === WebSocket.OPEN && selectedCue) socket.send(JSON.stringify({ t: Date.now(), type: 'practice', enabled: true, focus: selectedCue }));
 });
 ui['practice-button'].addEventListener('click', () => {
   if (socket?.readyState !== WebSocket.OPEN) return;
@@ -173,8 +179,8 @@ setupTracking({ onPose(pose, trackingState) {
     court_x: seatSign * pose.court_x,
     court_y: seatSign * Math.abs(pose.court_y),
   };
-  playerPosition = { x: signed.court_x, z: signed.court_y };
-  updateMinimap(signed);
+  lastRawPose = { x: signed.court_x, z: Math.abs(signed.court_y) };
+  if (!latestState?.players?.[localPlayer]) playerPosition = { x: signed.court_x, z: signed.court_y };
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(signed));
 } });
 
@@ -194,7 +200,9 @@ function updateControls() {
   ui['practice-button'].disabled = !(connected && rendererReady && localPlayer);
   ui['practice-button'].textContent = practiceEnabled ? 'Practice: On' : 'Practice: Off';
   ui['practice-button'].setAttribute('aria-pressed', String(practiceEnabled));
-  spawnButton.disabled = practiceEnabled || !(connected && rendererReady && phase === 'idle');
+  const isServer = latestState?.server === (localPlayer === 'A' ? 1 : 2);
+  spawnButton.disabled = practiceEnabled || !(connected && rendererReady && ((phase === 'idle' && isServer) || phase === 'game_over'));
+  spawnButton.textContent = phase === 'game_over' ? 'Play again' : 'Serve';
   ui['phase-dot'].className = `phase-dot ${connected ? phase || '' : ''}`;
   if (!connected) {
     ui['phase-title'].textContent = 'Connecting to court';
@@ -209,22 +217,26 @@ function updateControls() {
     ui['phase-description'].textContent = 'The server is connected. Waiting for the court renderer.';
     ui['swing-hint'].textContent = 'Your court will be ready shortly.';
   } else if (phase === 'idle') {
-    ui['phase-title'].textContent = 'Ready to play';
-    ui['phase-description'].textContent = 'No ball is in play. Request one when you’re ready.';
-    ui['swing-hint'].textContent = 'Close the menu and click New ball, or use your phone.';
+    ui['phase-title'].textContent = isServer ? 'Your serve' : `${latestState?.server === 1 ? 'Red' : 'Blue'} serves`;
+    ui['phase-description'].textContent = `Singles · first to 11, win by 2. Serve from the ${latestState?.serve_side || 'right'}.`;
+    ui['swing-hint'].textContent = isServer ? 'Click Serve or press Space when ready.' : 'Wait for the server to start the next point.';
   } else if (phase === 'ready') {
     ui['phase-title'].textContent = canSwing ? 'Your serve' : `${teamName(latestState.ready_for)} serves`;
-    ui['phase-description'].textContent = canSwing ? 'The ball is waiting in front of you. Hit it to serve.' : 'Get ready to return the ball.';
+    ui['phase-description'].textContent = canSwing ? `Hit the waiting ball diagonally. You’re positioned on the ${latestState?.serve_side} service side.` : 'Get ready to return the ball.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
   } else if (phase === 'rally') {
-    ui['phase-title'].textContent = practiceEnabled ? 'Practice feed' : 'Ball in play';
+    ui['phase-title'].textContent = practiceEnabled ? 'Practice feed' : canSwing ? (latestState?.bounce_required ? 'Bounce first' : 'Your return') : 'Opponent’s return';
     ui['phase-description'].textContent = practiceEnabled
       ? 'A new ball arrives from the far side every three seconds.'
-      : canSwing ? 'Ball incoming. Move into position and swing to return it.' : 'Your shot is in flight. Get ready for the return.';
+      : canSwing ? (latestState?.bounce_required ? 'Let it bounce first, then return it. Move with WASD or camera tracking.' : 'Ball incoming. Move with WASD or camera tracking and swing.') : 'Your shot is in flight. Get ready for the return.';
     ui['swing-hint'].textContent = canSwing ? 'Swing your phone or press space when the ball reaches you.' : 'Follow the rally on your court.';
+  } else if (phase === 'game_over') {
+    ui['phase-title'].textContent = `${teamName(latestState.winner)} wins!`;
+    ui['phase-description'].textContent = `${latestState.score[0]}–${latestState.score[1]} · First to 11, win by 2.`;
+    ui['swing-hint'].textContent = 'Click Play again for a new match.';
   } else if (phase === 'reset') {
     ui['phase-title'].textContent = 'Shot finished';
-    ui['phase-description'].textContent = 'The ball will clear, then you can request another.';
+    ui['phase-description'].textContent = `${latestState?.server === 1 ? 'Red' : 'Blue'} serves next from the ${latestState?.serve_side || 'right'} side.`;
     ui['swing-hint'].textContent = 'The next ball waits for your button press.';
   } else {
     ui['phase-title'].textContent = 'Waiting for the ball';
@@ -235,7 +247,7 @@ function updateControls() {
 
 function isState(message) {
   return message.type === 'state' && Number.isFinite(message.t)
-    && ['idle', 'ready', 'rally', 'reset'].includes(message.phase)
+    && ['idle', 'ready', 'rally', 'reset', 'game_over'].includes(message.phase)
     && [1, 2].includes(message.server)
     && Array.isArray(message.score) && message.score.length === 2
     && message.score.every((n) => Number.isInteger(n) && n >= 0)
@@ -245,10 +257,17 @@ function isState(message) {
 function receiveState(state) {
   if (state.connections && localPlayer) {
     const own = state.connections[localPlayer], other = state.connections[localPlayer === 'A' ? 'B' : 'A'];
-    document.getElementById('match-status').textContent = state.multiplayer ? 'LIVE TWO PLAYER' : 'SOLO PRACTICE';
+    document.getElementById('match-status').textContent = state.multiplayer ? 'LIVE TWO PLAYER' : 'SINGLES · VS BOT';
     document.getElementById('pairing-status').textContent = `Your phone: ${own.phone ? 'connected' : 'waiting'} · Opponent MacBook: ${other.laptop ? 'connected' : 'waiting'} · Opponent phone: ${other.phone ? 'connected' : 'waiting'}`;
   }
   const previousPhase = latestState?.phase;
+  if (previousPhase === 'game_over' && state.phase !== 'game_over') {
+    selectedCue = null;
+    document.getElementById('coach-train').hidden = true;
+    document.getElementById('coach-decision').textContent = 'New match · Space to swing. WASD to move.';
+  }
+  const ownPose = state.players?.[localPlayer];
+  if (ownPose) { playerPosition = { x: ownPose.court_x, z: ownPose.court_y }; updateMinimap(ownPose); }
   if (state.players && court && typeof court.updateOpponent === 'function') {
     const opponentKey = localPlayer ? Object.keys(state.players).find((key) => key !== localPlayer) : Object.keys(state.players)[0];
     if (opponentKey) court.updateOpponent(state.players[opponentKey]);
@@ -281,7 +300,7 @@ function receiveState(state) {
   ui['serve-b'].hidden = state.server !== 2;
   court?.applyState(state, previousPhase);
   // Only rewrite explanatory UI when the phase changes, not on every 60 Hz snapshot.
-  if (state.phase !== previousPhase) updateControls();
+  updateControls();
 }
 
 function receiveRuling(message) {
@@ -347,6 +366,12 @@ function connect() {
       court?.updateController(message);
     }
     else if (message.type === 'pose' && Number.isFinite(message.court_x) && Number.isFinite(message.court_y)) receivePose(message);
+    else if (message.type === 'coach_status') document.getElementById('coach-decision').textContent = message.text;
+    else if (message.type === 'coach_decision') {
+      selectedCue = message.cue;
+      document.getElementById('coach-train').hidden = !['move_to_ball', 'add_loft', 'soften_power'].includes(selectedCue);
+      document.getElementById('coach-decision').textContent = `${message.path === 'model' ? 'Nemotron live' : 'Offline / fallback'} · Rally ${message.rally_id} · ${message.text} (${Math.round(message.latency_ms)}ms · evidence #${message.evidence_index + 1})`;
+    }
     else if (message.type === 'ruling') receiveRuling(message);
     else if (message.type === 'classification') receiveClassification(message);
     else if (message.type === 'ruling_evidence') receiveRulingEvidence(message);
@@ -374,13 +399,35 @@ function swing() {
   setTimeout(updateControls, 500);
 }
 
+const movementKeys = new Set();
+let keyboardPose = null, keyboardSendAt = 0;
+window.addEventListener('keydown', e => {
+  if (sidebar.open || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target?.tagName) || e.target?.isContentEditable) return;
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { movementKeys.add(e.code); e.preventDefault(); }
+});
+window.addEventListener('keyup', e => movementKeys.delete(e.code));
+window.addEventListener('blur', () => movementKeys.clear());
+function moveKeyboard(dt) {
+  if (!movementKeys.size || !localPlayer || socket?.readyState !== WebSocket.OPEN) { keyboardPose = null; return; }
+  keyboardPose ??= { ...(lastRawPose || { x: 0, z: CONFIG.player.homeDepth }) };
+  const dx = Number(movementKeys.has('KeyD') || movementKeys.has('ArrowRight')) - Number(movementKeys.has('KeyA') || movementKeys.has('ArrowLeft'));
+  const dz = Number(movementKeys.has('KeyS') || movementKeys.has('ArrowDown')) - Number(movementKeys.has('KeyW') || movementKeys.has('ArrowUp'));
+  keyboardPose.x = Math.max(-6, Math.min(6, keyboardPose.x + seatSign * dx * dt * 3));
+  keyboardPose.z = Math.max(0.5, Math.min(8, keyboardPose.z + dz * dt * 3));
+  if (performance.now() - keyboardSendAt < 33) return;
+  keyboardSendAt = performance.now();
+  lastRawPose = { ...keyboardPose };
+  socket.send(JSON.stringify({ type: 'pose', t: Date.now(), court_x: keyboardPose.x, court_y: seatSign * keyboardPose.z, torso_deg: 0, wrist_h: CONFIG.player.paddleHeight }));
+}
+
 ui['swing-button'].addEventListener('click', swing);
 window.addEventListener('keydown', (event) => {
   if (sidebar.open || event.target === menuToggle || event.target === document.getElementById('camera-button')) return;
   if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
   if (event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) return;
   event.preventDefault();
-  swing();
+  if (latestState?.phase === 'idle' && !spawnButton.disabled) spawnButton.click();
+  else swing();
 });
 window.addEventListener('pagehide', () => {
   closing = true;
@@ -422,7 +469,7 @@ function createCourt(THREE) {
   scene.background = new THREE.Color('#111a2a');
   scene.fog = new THREE.Fog('#111a2a', 35, 90);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
@@ -442,7 +489,7 @@ function createCourt(THREE) {
   const sun = new THREE.DirectionalLight('#fff1cd', 3);
   sun.position.set(-8, 15, -5);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(1024, 1024);
   Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 14, bottom: -14, near: 0.5, far: 45 });
   sun.shadow.bias = -0.0005;
   scene.add(sun);
@@ -490,6 +537,12 @@ function createCourt(THREE) {
   }
   box(0.034, netHeight, 0.025, '#e8e6c8', 0, netHeight / 2, 0.022);
 
+  // Batch static seating by material: hundreds of chairs become three draw calls.
+  const seatBatches = new Map();
+  function arenaSeat(w, h, d, color, x, y, z) {
+    if (!seatBatches.has(color)) seatBatches.set(color, []);
+    seatBatches.get(color).push({ w, h, d, x, y, z });
+  }
   // Symmetric arena seating and light rigs frame both players' viewpoints.
   for (const sign of [-1, 1]) {
     const color = sign > 0 ? '#a94350' : '#326bb5';
@@ -498,12 +551,12 @@ function createCourt(THREE) {
     for (let row = 0; row < 5; row++) {
       box(24, 0.6 + row * 0.55, 1.2, '#25364b', 0, (0.6 + row * 0.55) / 2, sign * (11 + row * 1.3));
       for (let seat = -11; seat <= 11; seat++) {
-        box(0.65, 0.5, 0.5, seat % 3 ? color : '#718298', seat, 1 + row * 0.55, sign * (11 + row * 1.3));
+        arenaSeat(0.65, 0.5, 0.5, seat % 3 ? color : '#718298', seat, 1 + row * 0.55, sign * (11 + row * 1.3));
       }
     }
     for (let row = 0; row < 4; row++) {
       box(1.2, 0.6 + row * 0.55, 19, '#25364b', sign * (8 + row * 1.3), (0.6 + row * 0.55) / 2, 0);
-      for (let seat = -9; seat <= 9; seat++) box(0.5, 0.5, 0.65, seat > 0 ? '#a94350' : '#326bb5', sign * (8 + row * 1.3), 1 + row * 0.55, seat);
+      for (let seat = -9; seat <= 9; seat++) arenaSeat(0.5, 0.5, 0.65, seat > 0 ? '#a94350' : '#326bb5', sign * (8 + row * 1.3), 1 + row * 0.55, seat);
     }
     for (const z of [-10, 10]) {
       box(0.18, 10, 0.18, '#46576c', sign * 7, 5, z);
@@ -512,6 +565,19 @@ function createCourt(THREE) {
     box(0.2, 0.2, 24, '#526177', sign * 7, 10, 0);
   }
 
+  for (const [color, seats] of seatBatches) {
+    const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color, roughness: 0.82 }), seats.length);
+    const transform = new THREE.Object3D();
+    seats.forEach((seat, i) => {
+      transform.position.set(seat.x, seat.y, seat.z); transform.scale.set(seat.w, seat.h, seat.d);
+      transform.updateMatrix(); mesh.setMatrixAt(i, transform.matrix);
+    });
+    mesh.receiveShadow = true; mesh.instanceMatrix.needsUpdate = true; scene.add(mesh);
+  }
+  // A faint service-box wash makes the legal diagonal landing target readable.
+  const serveTarget = new THREE.Mesh(new THREE.PlaneGeometry(width / 2, serviceDepth), new THREE.MeshBasicMaterial({ color: '#efff96', transparent: true, opacity: 0.13, depthWrite: false }));
+  serveTarget.rotation.x = -Math.PI / 2; scene.add(serveTarget);
+  const ballMotion = new BallInterpolation();
   const ball = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.physics.ballRadius, 24, 16), new THREE.MeshStandardMaterial({ color: '#e9ff50', roughness: 0.5, emissive: '#a9bd22', emissiveIntensity: 0.32 }));
   ball.castShadow = true;
   ball.visible = false;
@@ -625,7 +691,12 @@ function createCourt(THREE) {
   }
   function applyState(state, previousPhase) {
     if (state.phase !== 'rally' || previousPhase !== 'rally') clearTrail();
-    ball.visible = ballShadow.visible = state.phase !== 'idle';
+    ballMotion.push(state, performance.now());
+    serveTarget.visible = state.phase === 'ready';
+    const servingSign = state.server === 1 ? 1 : -1;
+    const serviceSign = state.serve_side === 'left' ? -1 : 1;
+    serveTarget.position.set(-servingSign * serviceSign * width / 4, 0.016, -servingSign * (kitchenDepth + serviceDepth / 2));
+    ball.visible = ballShadow.visible = !['idle', 'game_over'].includes(state.phase);
     ball.position.set(state.ball.x, state.ball.y, state.ball.z);
     ballShadow.position.set(state.ball.x, 0.006, state.ball.z);
     ballShadow.scale.setScalar(1 + Math.max(0, state.ball.y) * 0.25);
@@ -669,12 +740,20 @@ function createCourt(THREE) {
     camera.updateProjectionMatrix();
   });
   resizeObserver.observe(container);
+  let lastFrame = performance.now();
   renderer.setAnimationLoop(() => {
+    const now = performance.now(), dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+    moveKeyboard(dt);
+    const renderedBall = ballMotion.sample(now);
+    if (renderedBall) {
+      ball.position.set(renderedBall.x, renderedBall.y, renderedBall.z);
+      ballShadow.position.set(renderedBall.x, 0.006, renderedBall.z);
+    }
     // Keep walking eye level fixed. Perspective changes while approaching the
     // camera can look like a jump to monocular tracking and must not raise POV.
     cameraTarget.set(playerPosition.x, CONFIG.render.eyeHeight, playerPosition.z);
     playerRing.position.set(playerPosition.x, 0.012, playerPosition.z);
-    camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
+    camera.position.lerp(cameraTarget, 1 - Math.pow(1 - CONFIG.render.cameraAlpha, dt * 60));
     // Lateral tracking is already filtered; avoid a second delay in the view.
     camera.position.x = cameraTarget.x;
     const ownColor = localPlayer === 'B' ? '#438ef5' : '#f05c65';
@@ -697,7 +776,7 @@ function createCourt(THREE) {
       trackingRenderState.wristOffset.z,
     );
     hand.position.copy(paddleTargetPosition);
-    paddle.quaternion.slerp(paddleTargetQuaternion, CONFIG.render.paddleRotationAlpha);
+    paddle.quaternion.slerp(paddleTargetQuaternion, 1 - Math.pow(1 - CONFIG.render.paddleRotationAlpha, dt * 60));
     renderer.render(scene, camera);
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {

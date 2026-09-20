@@ -249,12 +249,14 @@ test('two live player stations share one rally without the solo bot taking Playe
     await new Promise(resolve => setTimeout(resolve, 450));
     assert.equal(relay.sim.lastHitter, 'A');
     bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 }));
+    relay.sim.bounces = 1;
     Object.assign(relay.sim.ball, relay.sim.paddle('B'));
     bPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
     await waitForMessage(aLaptop.ws, message => message.type === 'state' && message.phase === 'rally' && message.last_hitter === 'B');
     assert.equal(relay.sim.events.filter(event => event.type === 'contact').at(-1).player, 'B');
     assert.equal(relay.sim.events.some(event => event.type === 'contact' && event.player === 'B'), true);
     assert.ok(relay.sim.ball.vz > 0, 'B returns toward A in the shared world');
+    relay.sim.bounces = 1;
     Object.assign(relay.sim.ball, relay.sim.paddle('A'));
     aPhone.ws.send(JSON.stringify({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic }));
     await waitForMessage(bLaptop.ws, message => message.type === 'state' && message.last_hitter === 'A');
@@ -270,13 +272,14 @@ test('two live player stations share one rally without the solo bot taking Playe
   }
 });
 
-test('visual phone yaw does not steer a straight contact sideways', async () => {
+test('fresh phone yaw steers the contact even after visual rate limiting', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws`;
   let phone, laptop;
   try {
     phone = (await openClient(`${endpoint}?role=phone&seat=B`)).ws;
     laptop = (await openClient(`${endpoint}?role=laptop&seat=B`)).ws;
+    relay.sim.servingTeam = 'B';
     relay.sim.spawn('B');
     const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 };
     for (let i = 0; i < 8; i++) phone.send(JSON.stringify(pose));
@@ -287,7 +290,7 @@ test('visual phone yaw does not steer a straight contact sideways', async () => 
     assert.equal((await shot).accepted, true);
     const contact = relay.sim.events.find(e => e.type === 'contact').ball;
     assert.ok(contact.vz > 0);
-    assert.ok(Math.abs(contact.vx / contact.vz) < 1e-10);
+    assert.ok(contact.vx < -1, 'B’s rightward face angle steers toward negative court X');
 
     relay.sim.reset(); relay.sim.spawn('B');
     const keyboard = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'laptop');

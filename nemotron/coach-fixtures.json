@@ -1,0 +1,434 @@
+[
+  {
+    "name": "serve into kitchen",
+    "expected": "serve_deep",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": -1,
+        "z": -1,
+        "in_bounds": true,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "serve_short",
+        "player": "A",
+        "time": 0.008333333333333333
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "A",
+      "rule": "serve_short",
+      "explanation": "The serve must clear the kitchen, including its line.",
+      "score": [
+        0,
+        0
+      ],
+      "side_out": true
+    }
+  },
+  {
+    "name": "serve into wrong service box",
+    "expected": "serve_diagonal",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": 1,
+        "z": -4,
+        "in_bounds": true,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "serve_diagonal",
+        "player": "A",
+        "time": 0.008333333333333333
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "A",
+      "rule": "serve_diagonal",
+      "explanation": "The serve must land in the diagonal service court.",
+      "score": [
+        0,
+        0
+      ],
+      "side_out": true
+    }
+  },
+  {
+    "name": "sideline miss",
+    "expected": "reduce_angle",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": -4,
+        "z": -4,
+        "in_bounds": false,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "out",
+        "player": "A",
+        "time": 0.008333333333333333
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "A",
+      "rule": "out",
+      "explanation": "The ball landed outside the court.",
+      "score": [
+        0,
+        0
+      ],
+      "side_out": true
+    }
+  },
+  {
+    "name": "baseline miss",
+    "expected": "soften_power",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": -1,
+        "z": -8,
+        "in_bounds": false,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "out",
+        "player": "A",
+        "time": 0.008333333333333333
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "A",
+      "rule": "out",
+      "explanation": "The ball landed outside the court.",
+      "score": [
+        0,
+        0
+      ],
+      "side_out": true
+    }
+  },
+  {
+    "name": "failed net clearance",
+    "expected": "add_loft",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": 1,
+        "z": 2,
+        "in_bounds": true,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "wrong_side",
+        "player": "A",
+        "time": 0.008333333333333333
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "A",
+      "rule": "wrong_side",
+      "explanation": "The shot did not land on the opponent’s court.",
+      "score": [
+        0,
+        0
+      ],
+      "side_out": true
+    }
+  },
+  {
+    "name": "receiver misses second bounce",
+    "expected": "move_to_ball",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "bounce",
+        "time": 0.008333333333333333,
+        "x": -1,
+        "z": -4,
+        "in_bounds": true,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "bounce",
+        "time": 0.016666666666666666,
+        "x": -1,
+        "z": -5,
+        "in_bounds": true,
+        "impactSpeed": 1.0815416666666666
+      },
+      {
+        "type": "rally_end",
+        "reason": "two_bounces",
+        "player": "B",
+        "time": 0.016666666666666666
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "B",
+      "rule": "two_bounces",
+      "explanation": "The ball bounced twice before the receiver returned it.",
+      "score": [
+        1,
+        0
+      ],
+      "side_out": false
+    }
+  },
+  {
+    "name": "early return volley",
+    "expected": "wait_for_bounce",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "rally_end",
+        "reason": "two_bounce_rule",
+        "player": "B",
+        "time": 0
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "B",
+      "rule": "two_bounce_rule",
+      "explanation": "The serve and its return must each bounce before volleying.",
+      "score": [
+        1,
+        0
+      ],
+      "side_out": false
+    }
+  },
+  {
+    "name": "kitchen volley",
+    "expected": "leave_kitchen",
+    "events": [
+      {
+        "type": "contact",
+        "player": "A",
+        "time": 0,
+        "ball": {
+          "x": 1.524,
+          "y": 0.85,
+          "z": 5.6056,
+          "vx": -2.590171523459796,
+          "vy": 6.45648193359375,
+          "vz": -8.67265567579439
+        },
+        "volley": false,
+        "swing": {
+          "type": "swing",
+          "t": 1,
+          "peak_g": 3.8,
+          "pitch": 14.2,
+          "roll": 0,
+          "yaw_rate": 220,
+          "duration_ms": 310
+        }
+      },
+      {
+        "type": "rally_end",
+        "reason": "kitchen_volley",
+        "player": "B",
+        "time": 0
+      }
+    ],
+    "ruling": {
+      "type": "ruling",
+      "fault": true,
+      "player": "B",
+      "rule": "kitchen_volley",
+      "explanation": "A volley cannot be played while touching the kitchen or its line.",
+      "score": [
+        1,
+        0
+      ],
+      "side_out": false
+    }
+  }
+]

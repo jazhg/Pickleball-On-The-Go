@@ -1,48 +1,90 @@
-# Pickleball On The Go — Milestone 1 + Nemotron
+# Pickleball On The Go — Singles + Nemotron coaching
 
-Recorded referee voice uses the clips in `client-laptop/audio/referee/` and replaces
-browser text-to-speech. The existing Voice toggle mutes recordings and remembers the
-choice. Confirmed serve and ruling events select factual calls. With `NEMOTRON_LIVE=1`
-and `NVIDIA_API_KEY`, Nemotron may choose one eligible praise recording or silence,
-at most once per 15 seconds; repeated praise waits 60 seconds. Late responses after
-the next contact are discarded. Calls never queue, and music lowers during speech.
-Offline play retains factual calls but omits model-selected praise. Recovery and
-game-point clips are included but reserved until reliable detection is implemented.
+Play singles to **11, win by 2**, with traditional side-out scoring (only the server scores).
+The relay owns the rules and ball at 120 Hz; both screens receive 60 Hz snapshots.
 
-**Nemotron does real work here — not chatbot work.** Two NVIDIA Nemotron models are wired
-into the live game loop: Nemotron 3 Nano classifies every swing (shot, target zone,
-confidence) from phone IMU data, and a Nemotron referee adjudicates every rally from the
-authoritative rally log, citing rulebook rules. Both run async and can never block or
-corrupt the 120 Hz simulation; when the model is unavailable the game degrades to
-honest, labeled fallbacks (heuristic classifier, provisional state-machine referee).
+- **Serve / Space:** request the ball, then swing your phone or press Space again.
+  Only the serving player can request or hit the serve. Virtual players move to the
+  correct right/even or left/odd service positions, and a highlighted box shows the
+  diagonal target. Tracking remains relative to that placement.
+- **WASD / arrow keys:** move without a camera. Enable camera for body tracking.
+- **Paddle direction:** turn the phone face to aim left/right; recenter establishes
+  neutral. Neutral serves are assisted diagonally. Rally shots preserve face bearing;
+  loft assistance compensates for drag. Brushing motion adds mild, decaying sidespin.
+- **Rules:** valid diagonal serves beyond the kitchen, two-bounce opening, kitchen
+  volleys and simulated follow-through entry, second-bounce faults, out balls, and
+  service foot position. Game over stays locked until **Play again**.
+- **Solo:** Blue is a return bot and takes its own serves. Connecting a Blue human
+  disables the bot for the session, including reconnects.
+- **Practice:** unlimited unscored feeds. Some coaching decisions expose **Practice
+  this cue**, which selects lateral-movement, low-feed, or slower-touch drills.
 
-Run the game:
+The game uses an assisted virtual underhand serve; phone IMU and camera tracking do
+not prove real-world wrist, waist, foot, or balance compliance. Kitchen contacts use
+an estimated player ground position and follow-through until the next contact.
+Ball/line calls use a ball-radius approximation. This is a playable rules-based
+simulation, not a certified human-match referee.
+Rules reference: [USA Pickleball rules](https://usapickleball.org/rules/).
+
+## Run
 
 ```sh
 npm install
-NEMOTRON_LIVE=1 NVIDIA_API_KEY=... npm start   # live models
-npm start                                       # offline-safe default
+npm run dev:http                 # localhost keyboard demo
+# For phones, configure trusted HTTPS as described below, then:
+npm start
 ```
 
-## Evidence (honest labels)
+To use live Nemotron, copy `.env.example` to `.env`, set `NVIDIA_API_KEY`, and keep
+`NEMOTRON_LIVE=1`. npm start/dev load `.env` automatically; it is gitignored and never
+served as a public asset. No API key was available for this implementation session,
+so **live-model behavior has not been verified**.
 
-- **All numbers below are OFFLINE unless a live run says otherwise.** Do not claim
-  live-model results until `python3 nemotron/eval.py --live` has actually run.
-- Referee: provisional state machine agrees with its own authored fixtures 50/50 —
-  a regression check, not independent evaluation. The 50 fixtures are synthetic and
-  **0 have been human-reviewed**; `nemotron/REVIEW_NOTES.md` is a non-authoritative
-  AI pre-review only.
-- Classifier: heuristic baseline 43/50 (86%) on synthetic swings; known drop→dink
-  confusion (low acceleration + low wrist overlap). 0/100 required human swings captured.
-- `nemotron/rules.json` now holds verbatim 2026 USA Pickleball Official Rulebook text,
-  but `reviewed_by` is EMPTY — two humans must still verify it before any citation
-  is trustworthy. The referee adapter refuses placeholder/unreviewed config.
-- In-game rulings before that review are labeled **provisional** in the HUD.
+## Where Nemotron fits
 
-See `server/INTEGRATION_NOTES.md` for architecture, timeouts, and guardrails, and
-`DEMO_SCRIPT.md` for the 90-second SteelHacks demo.
+The pipeline is **rally events → deterministic ruling → Nemotron cue selection →
+validated coaching card / practice drill**. The existing shot classifier and sparse
+recorded-commentary selector remain connected. The coaching decision uses NVIDIA's
+[Nemotron 3.5 Lightning](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b/modelcard)
+through the existing Python NVIDIA adapter.
+
+Nemotron selects an eligible cue and cites an event index. It cannot invent a score,
+fault, or executable action. The relay commits the result immediately; model work
+runs asynchronously with an 8-second request timeout and 9-second process deadline.
+Only one coaching job runs at a time; a newer completed rally invalidates its result.
+The interface explicitly labels live, baseline, and fallback paths. The old
+rulebook-review-gated referee remains available for its standalone evaluations,
+but it no longer controls match scoring.
+
+See [HACKATHON.md](HACKATHON.md) for the demo, architecture, evidence, and limitations.
+
+## Verification
+
+```sh
+npm test
+python3 -m unittest discover -s nemotron/tests
+node scripts/generate-coach-fixtures.js
+python3 nemotron/eval_coach.py --output nemotron/coach-eval-offline.json
+# With NVIDIA_API_KEY exported (Python does not load .env automatically):
+python3 nemotron/eval_coach.py --live --output nemotron/coach-eval-live.json
+node scripts/benchmark-gameplay.js
+```
+
+The committed coaching evaluation is **offline, 7/8 synthetic cases, zero human
+reviewed**. It records a baseline failure on deep vs wide misses. Mock response tests
+verify valid decisions, malformed outputs, invented score fields, invalid evidence,
+and network failure. They do not establish live model quality.
+
+Graphics retain the existing arena style while batching 382 static seats into three
+instanced draws, capping pixel ratio at 1.5 and shadows at 1024, and interpolating ball
+snapshots with a 35 ms buffer. CPU microbenchmarks are reproducible with the command
+above; they are not GPU frame-rate or device-latency measurements.
 
 ---
+
+The following setup notes describe the original controller/tracking integration.
+Current match behavior is described above.
+
 
 # Pickleball On The Go — Milestone 1
 

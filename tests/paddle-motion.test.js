@@ -62,10 +62,10 @@ test('both seats keep authoritative contact seat-symmetric and independent of mo
     const sim = new Simulation();
     const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1,
       motion_x: 4, motion_y: 2, motion_z: -5, motion_magnitude: 6.7, angular_speed: 120 };
-    sim.setController(pose, player); sim.spawn(player);
-    const center = paddleCenter({ x: 0, z: (player === 'A' ? 1 : -1) * CONFIG.player.homeDepth }, player, pose, CONFIG);
+    sim.servingTeam = player; sim.setController(pose, player); sim.spawn(player);
+    const center = sim.paddle(player);
     const waiting = { ...sim.ball };
-    assert.equal(waiting.x, CONFIG.player.x);
+    assert.equal(waiting.x, sim.serviceX(player));
     assert.ok((waiting.z - center.z) * (player === 'A' ? 1 : -1) < 0);
     sim.setController({ ...pose, motion_x: -4 }, player);
     sim.step();

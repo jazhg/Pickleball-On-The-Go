@@ -22,6 +22,7 @@ from baseline import adjudicate  # noqa: E402
 from classifier import classify_with_metadata, heuristic_classify  # noqa: E402
 from referee import referee_with_metadata  # noqa: E402
 from schema import SHOTS, ZONES  # noqa: E402
+from coach import select_cue
 from commentator import choose_clip  # noqa: E402
 
 
@@ -85,7 +86,11 @@ def op_commentary(req):
     return {'op': 'commentary', 'clip': clip, 'path': 'model' if live_enabled() else 'offline'}
 
 
-OPS = {"ping": op_ping, "classify": op_classify, "referee": op_referee, "commentary": op_commentary}
+def op_coach(req):
+    return {"op": "coach", **select_cue(req["events"], req["ruling"], live=live_enabled())}
+
+
+OPS = {"coach": op_coach, "ping": op_ping, "classify": op_classify, "referee": op_referee, "commentary": op_commentary}
 
 
 def respond(payload):

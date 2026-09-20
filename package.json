@@ -5,9 +5,9 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node server/index.js",
-    "dev:http": "node server/index.js --http",
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --env-file-if-exists=.env server/index.js",
+    "dev:http": "node --env-file-if-exists=.env server/index.js --http",
     "certs": "node scripts/setup-https.js",
     "test": "node --test tests/*.test.js"
   },

@@ -9,6 +9,7 @@ const fields = {
   classification: ['t', 'type', 'shot', 'target_zone', 'confidence', 'path'],
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
   spawn: ['t', 'type'],
+  new_game: ['t', 'type'],
   practice: ['t', 'type', 'enabled'],
   controller_pose: ['t', 'type', 'qx', 'qy', 'qz', 'qw'],
   hello: ['type', 'player', 'role'],
@@ -27,12 +28,13 @@ export function validMessage(msg) {
   const allowed = {
     swing: [],
     pose: ['player'],
-    state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections'],
+    state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections', 'winner', 'serve_side', 'bounce_required', 'rally_id'],
     ruling: [],
-    classification: [],
+    classification: ['shot_id', 'player'],
     ruling_evidence: [],
     spawn: [],
-    practice: ['player'],
+    new_game: [],
+    practice: ['player', 'focus'],
     controller_pose: ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'],
     hello: [],
   };
@@ -57,6 +59,10 @@ export function validMessage(msg) {
       && (msg.player === undefined || ['A', 'B'].includes(msg.player))
       && [undefined, null, 'A', 'B'].includes(msg.ready_for)
       && [undefined, null, 'A', 'B'].includes(msg.last_hitter)
+      && [undefined, null, 'A', 'B'].includes(msg.winner)
+      && [undefined, 'left', 'right'].includes(msg.serve_side)
+      && (msg.bounce_required === undefined || typeof msg.bounce_required === 'boolean')
+      && (msg.rally_id === undefined || (Number.isSafeInteger(msg.rally_id) && msg.rally_id >= 0))
       && (!msg.players || (typeof msg.players === 'object' && !Array.isArray(msg.players) && Object.entries(msg.players).every(([key, value]) => {
         if (!['A', 'B'].includes(key)) return false;
         if (value === null) return true;
@@ -68,7 +74,9 @@ export function validMessage(msg) {
     case 'classification': return finite(msg.t) && msg.t >= 0
       && SHOTS.has(msg.shot) && ZONES.has(msg.target_zone)
       && finite(msg.confidence) && msg.confidence >= 0 && msg.confidence <= 1
-      && typeof msg.path === 'string';
+      && typeof msg.path === 'string'
+      && (msg.shot_id === undefined || (Number.isSafeInteger(msg.shot_id) && msg.shot_id > 0))
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player));
     case 'ruling_evidence': return finite(msg.t) && msg.t >= 0
       && typeof msg.rule === 'string' && typeof msg.provisional === 'boolean'
       && typeof msg.path === 'string' && Array.isArray(msg.trigger_events)
@@ -76,9 +84,11 @@ export function validMessage(msg) {
       && (msg.preceding_shot === null || (msg.preceding_shot
         && SHOTS.has(msg.preceding_shot.shot) && ZONES.has(msg.preceding_shot.target_zone)
         && finite(msg.preceding_shot.confidence)));
+    case 'new_game':
     case 'spawn': return finite(msg.t) && msg.t >= 0;
     case 'practice': return finite(msg.t) && msg.t >= 0 && typeof msg.enabled === 'boolean'
-      && (msg.player === undefined || ['A', 'B'].includes(msg.player));
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player))
+      && (msg.focus === undefined || ['wait_for_bounce', 'leave_kitchen', 'serve_deep', 'serve_diagonal', 'reduce_angle', 'soften_power', 'add_loft', 'move_to_ball', 'ready_position'].includes(msg.focus));
     case 'controller_pose': {
       if (!['t', 'qx', 'qy', 'qz', 'qw'].every(k => finite(msg[k])) || msg.t < 0) return false;
       const motionFields = ['motion_x', 'motion_y', 'motion_z', 'motion_magnitude', 'angular_speed'];

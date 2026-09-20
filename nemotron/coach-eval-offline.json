@@ -1,0 +1,100 @@
+{
+  "mode": "offline",
+  "synthetic_cases": 8,
+  "human_reviewed": 0,
+  "correct": 7,
+  "paths": {
+    "baseline": 8
+  },
+  "mean_latency_ms": 0.0,
+  "cases": [
+    {
+      "name": "serve into kitchen",
+      "expected": "serve_deep",
+      "cue": "serve_deep",
+      "evidence_index": 2,
+      "text": "Aim beyond the kitchen into the diagonal service box.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "serve into wrong service box",
+      "expected": "serve_diagonal",
+      "cue": "serve_diagonal",
+      "evidence_index": 2,
+      "text": "Aim across the net into the opposite service box.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "sideline miss",
+      "expected": "reduce_angle",
+      "cue": "reduce_angle",
+      "evidence_index": 2,
+      "text": "Square the paddle face slightly to keep the next shot inside the sideline.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "baseline miss",
+      "expected": "soften_power",
+      "cue": "reduce_angle",
+      "evidence_index": 2,
+      "text": "Square the paddle face slightly to keep the next shot inside the sideline.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": false
+    },
+    {
+      "name": "failed net clearance",
+      "expected": "add_loft",
+      "cue": "add_loft",
+      "evidence_index": 2,
+      "text": "Open the paddle face slightly to clear the net.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "receiver misses second bounce",
+      "expected": "move_to_ball",
+      "cue": "move_to_ball",
+      "evidence_index": 3,
+      "text": "Move toward the incoming ball and return it after one bounce.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "early return volley",
+      "expected": "wait_for_bounce",
+      "cue": "wait_for_bounce",
+      "evidence_index": 1,
+      "text": "Let the serve and return bounce before volleying.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    },
+    {
+      "name": "kitchen volley",
+      "expected": "leave_kitchen",
+      "cue": "leave_kitchen",
+      "evidence_index": 1,
+      "text": "Move fully behind the kitchen line before a volley.",
+      "path": "baseline",
+      "reason": "offline",
+      "latency_ms": 0.0,
+      "correct": true
+    }
+  ]
+}

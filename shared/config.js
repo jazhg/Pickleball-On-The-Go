@@ -21,23 +21,21 @@ export const CONFIG = Object.freeze({
   },
   physics: {
     gravity: 9.81,
+    spinLift: 0.018, spinDecay: 1.1,
     drag: 0.025, // 0.01–0.08 m^-1: quadratic acceleration = -drag * |v| * v.
     restitution: 0.75, // 0.55–0.85: vertical bounce speed retained.
     surfaceRetention: 0.86, // 0.7–0.98: horizontal speed retained at bounce.
     netRetention: 0.18, // 0.05–0.3: speed retained on net contact.
     ballRadius: 0.037,
     minSpeed: 2.6, maxSpeed: 17.5, // 5–35 mph, design clamp with a stronger default hit profile.
-    aimAssist: 0.35, // 0–0.6; start at design's 0.30–0.40.
     hitWindowRadius: 0.9, // 0.6–1.3 m: generous estimated-paddle contact sphere.
     elevationBaseDeg: 18, // 12–22: flatter default trajectory.
     pitchGain: 0.18, // 0.1–0.3: reduce sensitivity to phone tilt.
     maxPitchInputDeg: 30, // 15–40: limit raw pitch before applying gain.
-    maxUpwardSpeed: 3.8, // 3–5 m/s: cap loft AFTER aim assist.
+    maxUpwardSpeed: 8.5, // Enough loft for an assisted serve from the baseline.
     minElevationDeg: 12, maxElevationDeg: 24, // 8–15 and 20–30.
     rollGain: 0.25, torsoGain: 0.5, // 0–1: azimuth weights.
     maxAzimuthDeg: 38, // 20–60: keep the first demo facing the far court.
-    targetX: 1.2, targetZ: -3.8, // x 0–2, z -2.5 to -5.5: far-side target.
-    minimumTargetFlightSeconds: 0.4, // 0.3–0.7: stability for short contacts.
   },
   player: { x: 0, homeDepth: 5.25, feedDepth: 4.8, paddleHeight: 0.95 },
   seats: { A: { sign: 1 }, B: { sign: -1 } },
@@ -98,7 +96,7 @@ export const CONFIG = Object.freeze({
     lateralDeadZone: 0.015, // Metres in court space.
     positionAlpha: 0.2, // 0.1–0.35: smooth camera position estimates.
     movementDeadZone: 0.035, // 0.015–0.08 m: ignore stationary court-position jitter.
-    minDepth: 2.1336, maxDepth: 6.1, // Kitchen line to the rear playable area; never cross the net.
+    minDepth: 0.5, maxDepth: 6.1, // Kitchen line to the rear playable area; never cross the net.
     edgeMargin: 0.35, // 0.2–0.6 m: avoid placing the player on the sideline.
     markerRadius: 0.35, // 0.2–0.5 m: ground-position circle size.
     wristVisibility: 0.65, // 0.55–0.8: low-confidence hands do not drive the paddle.

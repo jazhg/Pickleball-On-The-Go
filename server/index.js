@@ -10,7 +10,7 @@ import { CONFIG } from '../shared/config.js';
 import { normalizeControllerPose, parseMessage } from '../shared/protocol.js';
 import { parseAnalysis } from '../shared/shot-telemetry.js';
 import { Simulation } from './physics.js';
-import { adjudicateRally, classifySwing, validateRulingForApply, chooseCommentary } from './nemotron-bridge.js';
+import { classifySwing, coachRally, chooseCommentary, isLiveMode } from './nemotron-bridge.js';
 import { RefereeVoiceGate } from '../shared/referee-clips.js';
 
 // Translate authoritative sim events into fixture-style referee events so the
@@ -28,13 +28,15 @@ export function buildRallyEnvelope(sim) {
           contact_above_waist: false, upward_motion: true, paddle_below_wrist: true, t });
         serveLogged = true;
       } else {
-        events.push({ event: 'hit', player: e.player, id: `h${events.length}`, volley: false, t });
+        events.push({ event: 'hit', player: e.player, id: `h${events.length}`, volley: e.volley === true, t });
       }
     } else if (e.type === 'bounce') {
       events.push({ event: 'bounce', player: e.z < 0 ? 'B' : 'A',
         x: +e.x.toFixed(3), z: +e.z.toFixed(3), t });
     } else if (e.type === 'rally_end') {
-      if (e.reason === 'two_bounces') {
+      if (['A', 'B'].includes(e.player)) {
+        events.push({ event: 'fault', player: e.player, t });
+      } else if (e.reason === 'two_bounces') {
         const lastBounce = [...events].reverse().find((x) => x.event === 'bounce');
         const loser = lastBounce ? lastBounce.player : (lastHitter === 'A' ? 'B' : 'A');
         events.push({ event: 'fault', player: loser, t });
@@ -47,8 +49,8 @@ export function buildRallyEnvelope(sim) {
   return {
     events,
     game_state: {
-      score: [...sim.score],
-      serving_team: sim.servingTeam,
+      score: [...(sim.rallyStart?.score || sim.score)],
+      serving_team: sim.rallyStart?.servingTeam || sim.servingTeam,
       server_number: 1,
       scoring_mode: 'singles',
     },
@@ -130,7 +132,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       let sameOrigin = false;
       try { sameOrigin = new URL(req.headers.origin).host === req.headers.host; } catch { /* Require a browser same-origin request. */ }
       if (!sameOrigin) { res.writeHead(405, headers); return res.end(); }
-      sim.spawn('A');
+      sim.spawn(sim.servingTeam);
       res.writeHead(200, { ...headers, 'Content-Type': MIME['.json'] });
       return res.end(JSON.stringify({ ok: true }));
     }
@@ -266,7 +268,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         const accepted = sim.swing(msg, seat, aim);
         const horizontal = accepted ? Math.hypot(sim.ball.vx, sim.ball.vz) : 0;
         const shot = {
-          type: 'shot', id: nextShotId++, t: msg.t, source: ws.role, accepted,
+          type: 'shot', id: nextShotId++, player: seat, t: msg.t, source: ws.role, accepted,
           reason: accepted ? 'contact' : phaseBefore === 'idle' ? 'no_ball' : phaseBefore === 'ready' ? 'missed' : 'busy',
           swing: msg,
           launch_speed_mps: accepted ? Math.hypot(sim.ball.vx, sim.ball.vy, sim.ball.vz) : null,
@@ -281,15 +283,20 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
           considerCommentary(shot, seat).catch(() => {});
           // Physics launches immediately; classification runs async and must never
           // block the 120 Hz sim loop. The bridge always resolves (fallback included).
-          const pose = sim.pose ? { wrist_h: sim.pose.wrist_h, phase: sim.phase } : {};
+          const pose = { wrist_h: sim.players[seat]?.wrist_h ?? CONFIG.player.paddleHeight, phase: phaseBefore === 'ready' ? 'serve' : 'rally' };
           classifySwing(msg, pose).then((result) => {
+            if (lastShot?.id !== shot.id) return;
             const c = result.classification;
             lastClassification = { shot: c.shot, target_zone: c.target_zone, confidence: c.confidence };
             sendToLaptops({ t: Date.now(), type: 'classification', shot: c.shot,
-              target_zone: c.target_zone, confidence: c.confidence, path: result.path });
+              target_zone: c.target_zone, confidence: c.confidence, path: result.path, shot_id: shot.id, player: seat });
           }).catch(() => {});
         }
         console.log(`[${ws.role} ${seat}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);
+      } else if (msg.type === 'new_game' && ws.role === 'laptop' && sim.phase === 'game_over') {
+        completedRally = null;
+        sim.newGame();
+        sim.spawn('A');
       } else if (msg.type === 'spawn') {
         const player = ws.player || 'A';
         if (sim.spawn(player)) announce(player === 'A' ? 'red_serves' : 'blue_serves');
@@ -297,8 +304,12 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         practiceEnabled = msg.enabled;
         practicePlayer = ws.player || 'A';
         nextPracticeFeedAt = practiceEnabled ? performance.now() : Infinity;
-        if (!practiceEnabled) sim.reset();
-        sendToLaptops({ t: Date.now(), type: 'practice', enabled: practiceEnabled, player: practicePlayer });
+        completedRally = null;
+        sim.practiceFocus = msg.focus || null;
+        sim.practice = practiceEnabled;
+        sim.reset();
+        if (!practiceEnabled && sim.winner) sim.phase = 'game_over';
+        sendToLaptops({ t: Date.now(), type: 'practice', enabled: practiceEnabled, player: practicePlayer, ...(sim.practiceFocus ? { focus: sim.practiceFocus } : {}) });
       } else if (msg.type === 'pose' && ws.role === 'laptop') {
         const seat = ws.player || 'A';
         sim.setPose(msg, seat);
@@ -314,31 +325,32 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   const step = 1 / CONFIG.simulation.hz;
   let prevPhase = sim.phase;
   let botScheduled = false, botTimer = null, botContact = null;
+  let coachPending = false;
+  let completedRally = null;
   const onRallyComplete = async () => {
-    // Adjudication is async and never blocks the sim; a missing or malformed
-    // ruling leaves the score untouched (offline-safe default).
-    const envelope = buildRallyEnvelope(sim);
+    const ruling = sim.lastResult;
+    if (!ruling || completedRally === sim.events) return;
+    completedRally = sim.events;
     const rallyEvents = sim.events;
-    const shotAtRallyEnd = lastClassification; // snapshot: a fast next swing must not rewrite this rally's evidence
-    let response = null;
-    try { response = await adjudicateRally(envelope.events, envelope.game_state); }
-    catch (error) { console.warn('[nemotron] referee bridge failed:', error.message); }
-    if (!response || !response.ruling) return;
-    if (sim.events !== rallyEvents) return; // Never apply or announce a previous point over a new rally.
-    const ruling = validateRulingForApply(response.ruling, sim.score);
-    if (!ruling) { console.warn('[nemotron] ruling rejected by score guard'); return; }
-    const oldScore = [...sim.score];
-    sim.score = [...ruling.score];
-    if (ruling.side_out) sim.servingTeam = sim.servingTeam === 'A' ? 'B' : 'A';
-    const winner = ruling.score.findIndex((score, index) => score > oldScore[index]);
-    const clip = winner >= 0 ? (winner === 0 ? 'point_red' : 'point_blue')
-      : ruling.side_out ? 'side_out' : ruling.fault ? (ruling.player === 'A' ? 'fault_red' : 'fault_blue') : 'replay';
-    if (sim.phase !== 'rally' && sim.phase !== 'ready') announce(clip);
-    sendToLaptops({ type: 'ruling', fault: ruling.fault, player: ruling.player,
-      rule: ruling.rule, explanation: ruling.explanation, score: [...ruling.score], side_out: ruling.side_out });
+    const rallyId = sim.rallyId;
+    const envelope = buildRallyEnvelope(sim);
+    const clip = ruling.side_out ? 'side_out' : (ruling.player === 'A' ? 'point_blue' : 'point_red');
+    announce(clip);
+    sendToLaptops(ruling);
     sendToLaptops({ t: Date.now(), type: 'ruling_evidence', rule: ruling.rule,
-      provisional: response.provisional !== false, path: response.path || 'unknown',
-      trigger_events: describeEvents(envelope.events), preceding_shot: shotAtRallyEnd });
+      provisional: true, path: 'game_engine', trigger_events: describeEvents(envelope.events), preceding_shot: lastClassification });
+    if (coachPending) {
+      sendToLaptops({ type: 'coach_status', text: 'New rally completed · previous coaching analysis still finishing.' });
+      return;
+    }
+    coachPending = true;
+    sendToLaptops({ type: 'coach_status', text: isLiveMode() ? 'Nemotron is selecting a training cue…' : 'Offline coaching · baseline decision' });
+    try {
+      const decision = await coachRally(rallyEvents, ruling);
+      if (decision && completedRally === rallyEvents && !practiceEnabled) sendToLaptops({ type: 'coach_decision', rally_id: rallyId, ...decision });
+      else if (!decision && completedRally === rallyEvents && !practiceEnabled) sendToLaptops({ type: 'coach_status', text: 'Coaching unavailable · scoring continues normally.' });
+      else if (completedRally !== rallyEvents && !practiceEnabled) sendToLaptops({ type: 'coach_status', text: 'Older coaching result discarded · ready for the next rally.' });
+    } finally { coachPending = false; }
   };
   let lastBounceSoundAt = -Infinity;
   const tick = setInterval(() => {
@@ -361,12 +373,14 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     }
     if (sim.phase !== prevPhase) {
       if (sim.phase === 'rally') botScheduled = false;
-      if (!practiceEnabled && prevPhase === 'rally' && sim.phase === 'reset') {
+      if (!practiceEnabled && sim.lastResult && completedRally !== sim.events) {
         if (botTimer) { clearTimeout(botTimer); botTimer = null; }
         onRallyComplete();
       }
       prevPhase = sim.phase;
     }
+    // Swing faults may finish a rally between timer ticks.
+    if (!practiceEnabled && sim.lastResult && completedRally !== sim.events) onRallyComplete();
     // Each new contact starts a new shot, even within the same rally.
     const contactIndex = sim.events.findLastIndex(e => e.type === 'contact');
     const contact = sim.events[contactIndex];
@@ -380,6 +394,11 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       botTimer = null;
       botScheduled = true;
     }
+    if (!practiceEnabled && !multiplayer && sim.phase === 'idle' && sim.servingTeam === 'B') sim.spawn('B');
+    if (!practiceEnabled && !multiplayer && sim.phase === 'ready' && sim.readyFor === 'B') {
+      sim.swing({ t: Date.now(), type: 'swing', ...CONFIG.swing.synthetic, roll: 0, pitch: 0 }, 'B');
+      sendToLaptops({ type: 'racket_hit', t: Date.now() });
+    }
     // Return the current A shot's first in-bounds far-side bounce.
     // Solo mode gets the training return. When Player B has joined, the real
     // Player B phone/laptop owns the next contact and the bot stays out.
@@ -390,7 +409,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         botTimer = setTimeout(() => {
           botTimer = null;
           if (!multiplayer && sim.botReturn()) sendToLaptops({ type: 'racket_hit', t: Date.now() });
-        }, 350);
+        }, 180);
       }
     }
   }, 1000 / CONFIG.simulation.hz);

@@ -22,6 +22,7 @@ let ballPhase = null;
 let localPlayer = null;
 let readyFor = null;
 let lastHitter = null;
+let servingPlayer = 'A', bounceRequired = false, matchWinner = null;
 let latestOrientation = null;
 let latestOrientationAt = -Infinity;
 let neutralOrientation = null;
@@ -38,12 +39,13 @@ function canSwingNow() {
 function updateBallControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
   ui.synthetic.disabled = !connected || !canSwingNow() || Boolean(pendingRecenter);
-  spawnButton.disabled = !connected || ballPhase !== 'idle';
+  spawnButton.disabled = !connected || ballPhase !== 'idle' || servingPlayer !== localPlayer;
   $('ball-status').textContent =
     !connected ? 'Connect to the court first.'
     : !localPlayer ? 'Waiting for your seat assignment…'
-    : canSwingNow() ? (ballPhase === 'ready' ? 'Your serve. Swing when ready.' : 'Your return. Swing!')
-    : ballPhase === 'idle' ? 'Tap New ball to play.'
+    : canSwingNow() ? (ballPhase === 'ready' ? 'Your serve. Swing when ready.' : (bounceRequired ? 'Let it bounce first, then swing!' : 'Your return. Swing!'))
+    : ballPhase === 'game_over' ? `${matchWinner === localPlayer ? 'You win!' : 'Game over.'} Start a rematch on the laptop.`
+    : ballPhase === 'idle' ? (servingPlayer === localPlayer ? 'Your serve. Tap Serve to play.' : 'Opponent serves next.')
     : ballPhase === 'ready' ? `${readyFor === 'A' ? 'Red' : 'Blue'} is serving. Wait for it to reach you.`
     : ballPhase === 'rally' ? 'Your shot is in flight. Wait for the other side.'
     : ballPhase === 'reset' ? 'Point finished. Get ready…'
@@ -107,6 +109,9 @@ function connect() {
         paddleMotion.reset();
         detector.reset();
       }
+      servingPlayer = msg.server === 2 ? 'B' : 'A';
+      bounceRequired = msg.bounce_required === true;
+      matchWinner = msg.winner;
       ballPhase = msg.phase;
       readyFor = msg.ready_for ?? null;
       lastHitter = msg.last_hitter ?? null;

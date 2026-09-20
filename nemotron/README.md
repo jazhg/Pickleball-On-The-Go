@@ -1,3 +1,10 @@
+> **Current gameplay integration:** see [HACKATHON.md](../HACKATHON.md) and
+> [server integration notes](../server/INTEGRATION_NOTES.md). Match scoring is now
+> deterministic; `coach.py` selects a training cue/action from the completed rally.
+> `eval_coach.py` evaluates this path. The classifier and recorded-commentary
+> selector remain connected. The referee described below is retained for standalone
+> evaluations; its rulebook review requirement remains intact.
+
 # Standalone Nemotron replay package
 
 Python 3.9+ standard library only. No pip packages, game imports, GPU or phone
