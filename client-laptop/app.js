@@ -3,6 +3,22 @@ import { CONFIG } from '/shared/config.js';
 import { validMessage } from '/shared/protocol.js';
 import { setupTracking } from './tracking.js';
 
+const teamName = player => player === 'A' ? 'Red' : player === 'B' ? 'Blue' : 'Team';
+const sidebar = document.getElementById('game-sidebar');
+const menuToggle = document.getElementById('menu-toggle');
+menuToggle.addEventListener('click', () => {
+  sidebar.showModal();
+  menuToggle.setAttribute('aria-expanded', 'true');
+});
+document.getElementById('menu-close').addEventListener('click', () => sidebar.close());
+sidebar.addEventListener('close', () => {
+  menuToggle.setAttribute('aria-expanded', 'false');
+  menuToggle.focus();
+});
+sidebar.addEventListener('click', event => {
+  if (event.target === sidebar && event.clientX > sidebar.getBoundingClientRect().right) sidebar.close();
+});
+
 // The laptop renders server snapshots. There is deliberately no ball simulation here.
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 const ui = Object.fromEntries([
@@ -30,7 +46,7 @@ function speakRuling(message) {
   if (voiceMuted || !('speechSynthesis' in window)) return;
   const words = RULE_WORDS[message.rule] || String(message.rule).replace(/_/g, ' ');
   const text = message.fault
-    ? `Fault. Player ${message.player}. ${words}.`
+    ? `Fault. ${teamName(message.player)}. ${words}.`
     : 'No fault. Play on.';
   speechSynthesis.cancel();
   speechSynthesis.speak(new SpeechSynthesisUtterance(text));
@@ -131,7 +147,12 @@ function updatePhoneLinks() {
   opponentURL.searchParams.set('seat', localPlayer === 'B' ? 'A' : 'B');
   const invite = document.getElementById('opponent-link');
   invite.href = opponentURL.href;
-  invite.textContent = opponentURL.href;
+  invite.title = opponentURL.href;
+  const opponentPhoneURL = new URL('/client-phone/', phoneBaseURL);
+  opponentPhoneURL.searchParams.set('seat', localPlayer === 'B' ? 'A' : 'B');
+  document.getElementById('opponent-phone-link').href = opponentPhoneURL.href;
+  document.getElementById('own-team-title').textContent = `${teamName(localPlayer || 'A')} · You`;
+  document.getElementById('opponent-team-title').textContent = `${teamName(localPlayer === 'B' ? 'A' : 'B')} · Opponent`;
 }
 async function discoverPhoneURL() {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return;
@@ -188,11 +209,11 @@ function updateControls() {
     ui['phase-description'].textContent = 'The server is connected. Waiting for the court renderer.';
     ui['swing-hint'].textContent = 'Your court will be ready shortly.';
   } else if (phase === 'idle') {
-    ui['phase-title'].textContent = 'Spawn a ball to start';
+    ui['phase-title'].textContent = 'Ready to play';
     ui['phase-description'].textContent = 'No ball is in play. Request one when you’re ready.';
-    ui['swing-hint'].textContent = 'Click Spawn ball here or on your phone.';
+    ui['swing-hint'].textContent = 'Close the menu and click New ball, or use your phone.';
   } else if (phase === 'ready') {
-    ui['phase-title'].textContent = canSwing ? 'Your serve' : `Player ${latestState.ready_for} is serving`;
+    ui['phase-title'].textContent = canSwing ? 'Your serve' : `${teamName(latestState.ready_for)} serves`;
     ui['phase-description'].textContent = canSwing ? 'The ball is at your paddle. Send it over the net.' : 'Get ready to return the ball.';
     ui['swing-hint'].textContent = 'Or press the spacebar on your keyboard.';
   } else if (phase === 'rally') {
@@ -267,7 +288,7 @@ function receiveRuling(message) {
     || typeof message.side_out !== 'boolean' || !Array.isArray(message.score)
     || message.score.length !== 2 || !message.score.every((n) => Number.isInteger(n) && n >= 0)) return;
   const reference = message.rule === 'none' ? '' : ` · ${message.rule}`;
-  ui['last-ruling'].textContent = `${message.fault ? `Fault${message.player ? ` · Player ${message.player}` : ''}` : 'No fault'}${reference}. ${message.explanation}`;
+  ui['last-ruling'].textContent = `${message.fault ? `Fault${message.player ? ` · ${teamName(message.player)}` : ''}` : 'No fault'}${reference}. ${message.explanation}`;
   ui['score-a'].textContent = String(message.score[0]).padStart(2, '0');
   ui['score-b'].textContent = String(message.score[1]).padStart(2, '0');
   analytics.rallies += 1;
@@ -302,7 +323,8 @@ function connect() {
       assignedURL.searchParams.set('seat', localPlayer);
       window.history.replaceState(null, '', assignedURL);
       seatSign = localPlayer === 'A' ? 1 : -1;
-      document.getElementById('seat-badge').textContent = `YOU ARE PLAYER ${localPlayer}`;
+      document.getElementById('seat-badge').textContent = `YOU · ${teamName(localPlayer).toUpperCase()}`;
+      document.body.dataset.team = teamName(localPlayer).toLowerCase();
       updatePhoneLinks();
       document.querySelectorAll('.player-label').forEach((label, index) => {
         label.classList.toggle('is-local', localPlayer === (index === 0 ? 'A' : 'B'));
@@ -345,6 +367,7 @@ function swing() {
 
 ui['swing-button'].addEventListener('click', swing);
 window.addEventListener('keydown', (event) => {
+  if (sidebar.open || event.target === menuToggle || event.target === document.getElementById('camera-button')) return;
   if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
   if (event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) return;
   event.preventDefault();
@@ -373,9 +396,9 @@ seatBURL.searchParams.set('seat', 'B');
 const seatALink = document.getElementById('seat-a-link');
 const seatBLink = document.getElementById('seat-b-link');
 seatALink.href = seatAURL.href;
-seatALink.textContent = 'Player A laptop';
+seatALink.textContent = 'Red laptop';
 seatBLink.href = seatBURL.href;
-seatBLink.textContent = 'Player B laptop';
+seatBLink.textContent = 'Blue laptop';
 ui['transport-note'].append('Phone setup: ', phoneLink, document.createTextNode(isLocalhost
   ? ' · On your phone, replace localhost with this laptop’s LAN IP and use HTTPS. Install and fully trust the mkcert CA on iOS.'
   : location.protocol === 'https:'
@@ -387,8 +410,8 @@ discoverPhoneURL();
 function createCourt(THREE) {
   const container = ui['court-canvas'];
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#c5d6c0');
-  scene.fog = new THREE.Fog('#c5d6c0', 23, 65);
+  scene.background = new THREE.Color('#111a2a');
+  scene.fog = new THREE.Fog('#111a2a', 35, 90);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -423,9 +446,11 @@ function createCourt(THREE) {
     scene.add(object);
     return object;
   }
-  box(150, 0.12, 150, '#97aa83', 0, -0.12, 0);
-  box(width + 6, 0.08, length + 5.5, '#4b7964', 0, -0.046, 0);
-  box(width, 0.015, length, '#397d76', 0, -0.0085, 0);
+  box(150, 0.12, 150, '#172334', 0, -0.12, 0);
+  box(width + 6, 0.08, length + 5.5, '#273b4b', 0, -0.046, 0);
+  const serviceDepth = length / 2 - kitchenDepth;
+  box(width, 0.015, serviceDepth, '#a94350', 0, -0.0085, kitchenDepth + serviceDepth / 2);
+  box(width, 0.015, serviceDepth, '#326bb5', 0, -0.0085, -kitchenDepth - serviceDepth / 2);
   box(width, 0.017, kitchenDepth * 2, '#88a881', 0, -0.0085, 0);
   const lineColor = '#eff0cf';
   const lineY = 0.002;
@@ -456,23 +481,26 @@ function createCourt(THREE) {
   }
   box(0.034, netHeight, 0.025, '#e8e6c8', 0, netHeight / 2, 0.022);
 
-  // Low back fences and planting keep the horizon legible without a second station.
-  const backZ = -length / 2 - 2.2;
-  for (const x of [-5.4, -2.7, 0, 2.7, 5.4]) box(0.055, 2.1, 0.055, '#4c6752', x, 1.05, backZ);
-  box(10.8, 0.055, 0.055, '#4c6752', 0, 2.1, backZ);
-  const fence = new THREE.Mesh(new THREE.PlaneGeometry(10.8, 2.1), new THREE.MeshBasicMaterial({ color: '#587d5d', transparent: true, opacity: 0.18, side: THREE.DoubleSide }));
-  fence.position.set(0, 1.05, backZ);
-  scene.add(fence);
-  for (let i = 0; i < 14; i += 1) {
-    const x = (i - 6.5) * 3.2;
-    const z = -16 - (i % 3) * 2.2;
-    const height = 3.2 + (i % 4) * 0.6;
-    box(0.22, height * 0.6, 0.22, '#6a7952', x, height * 0.3, z);
-    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(height * 0.42, 1), new THREE.MeshStandardMaterial({ color: i % 2 ? '#748f66' : '#829b6e', roughness: 1, flatShading: true }));
-    crown.position.set(x, height * 0.85, z);
-    crown.scale.set(0.8, 1.25, 0.8);
-    crown.castShadow = true;
-    scene.add(crown);
+  // Symmetric arena seating and light rigs frame both players' viewpoints.
+  for (const sign of [-1, 1]) {
+    const color = sign > 0 ? '#a94350' : '#326bb5';
+    box(23, 1, 0.25, '#23354a', 0, 0.5, sign * 10);
+    box(23, 0.08, 0.3, color, 0, 1.02, sign * 10, { emissive: color, emissiveIntensity: 0.5 });
+    for (let row = 0; row < 5; row++) {
+      box(24, 0.6 + row * 0.55, 1.2, '#25364b', 0, (0.6 + row * 0.55) / 2, sign * (11 + row * 1.3));
+      for (let seat = -11; seat <= 11; seat++) {
+        box(0.65, 0.5, 0.5, seat % 3 ? color : '#718298', seat, 1 + row * 0.55, sign * (11 + row * 1.3));
+      }
+    }
+    for (let row = 0; row < 4; row++) {
+      box(1.2, 0.6 + row * 0.55, 19, '#25364b', sign * (8 + row * 1.3), (0.6 + row * 0.55) / 2, 0);
+      for (let seat = -9; seat <= 9; seat++) box(0.5, 0.5, 0.65, seat > 0 ? '#a94350' : '#326bb5', sign * (8 + row * 1.3), 1 + row * 0.55, seat);
+    }
+    for (const z of [-10, 10]) {
+      box(0.18, 10, 0.18, '#46576c', sign * 7, 5, z);
+      box(2.5, 0.2, 0.5, '#f0f6ff', sign * 7, 10, z, { emissive: '#dceaff', emissiveIntensity: 2 });
+    }
+    box(0.2, 0.2, 24, '#526177', sign * 7, 10, 0);
   }
 
   const ball = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.physics.ballRadius, 24, 16), new THREE.MeshStandardMaterial({ color: '#e9ff50', roughness: 0.5, emissive: '#a9bd22', emissiveIntensity: 0.32 }));
@@ -630,6 +658,12 @@ function createCourt(THREE) {
     camera.position.x = cameraTarget.x;
     camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
     const center = paddleCenter(playerPosition, localPlayer, paddleMotion);
+    const ownColor = localPlayer === 'B' ? '#438ef5' : '#f05c65';
+    const otherColor = localPlayer === 'B' ? '#f05c65' : '#438ef5';
+    face.material.color.set(ownColor);
+    playerRing.material.color.set(ownColor);
+    opponentBody.material.color.set(otherColor);
+    opponentPaddle.material.color.set(otherColor);
     paddle.position.set(center.x, center.y, center.z);
     seatRotation.set(0, seatSign > 0 ? 0 : 1, 0, seatSign > 0 ? 1 : 0);
     paddle.quaternion.copy(seatRotation).multiply(paddleTargetQuaternion);

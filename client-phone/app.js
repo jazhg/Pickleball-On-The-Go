@@ -44,7 +44,7 @@ function updateBallControls() {
     : !localPlayer ? 'Waiting for your seat assignment…'
     : canSwingNow() ? (ballPhase === 'ready' ? 'Your serve. Swing when ready.' : 'Your return. Swing!')
     : ballPhase === 'idle' ? 'Tap New ball to play.'
-    : ballPhase === 'ready' ? `Player ${readyFor} is serving. Wait for it to reach you.`
+    : ballPhase === 'ready' ? `${readyFor === 'A' ? 'Red' : 'Blue'} is serving. Wait for it to reach you.`
     : ballPhase === 'rally' ? 'Your shot is in flight. Wait for the other side.'
     : ballPhase === 'reset' ? 'Point finished. Get ready…'
     : 'Waiting for court state…';
@@ -91,7 +91,8 @@ function connect() {
       assignedURL.searchParams.set('seat', localPlayer);
       window.history?.replaceState(null, '', assignedURL);
       const badge = $('seat-badge');
-      badge.textContent = `PLAYER ${localPlayer}`;
+      badge.textContent = localPlayer === 'A' ? 'RED' : 'BLUE';
+      badge.className = `seat ${localPlayer === 'A' ? 'team-red' : 'team-blue'}`;
 
       updateBallControls();
       return;

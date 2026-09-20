@@ -45,7 +45,7 @@ From this folder:
 
 ```sh
 npm install
-npm run dev
+npm run dev:http
 ```
 
 Open [http://localhost:8443/client-laptop/](http://localhost:8443/client-laptop/) and press Space. This is keyboard-only localhost mode. It is useful for verifying the game and does not make the server reachable from a phone.
@@ -86,7 +86,7 @@ The phone page should show **Connected to the laptop**. Tap **Send test swing** 
 | --- | --- |
 | Phone cannot open the page | Do not use `localhost` on the phone. Use the LAN URL printed by `npm start`; check both devices are on the same Wi-Fi and macOS Firewall allows Node. |
 | “Connection is not private” | Install `rootCA.pem` and enable full trust on the iPhone. On the laptop, run `mkcert -install`. |
-| Page opens but says “Waiting for the laptop” | The laptop is probably running `npm run dev` (localhost-only HTTP), or the phone and laptop URLs use different ports. Stop it and run `npm start`. |
+| Page opens but says “Waiting for the laptop” | The laptop is probably running `npm run dev:http` (localhost-only HTTP), or the phone and laptop URLs use different ports. Stop it and run `npm start`. |
 | Page says “HTTPS required” | Reopen the `https://` URL. iOS motion permission is not available on a LAN `http://` page. |
 | Connected, but motion stays “NO DATA” | Tap **Enable motion access** in Safari, keep the page foregrounded, check iOS Settings → Safari → Motion & Orientation Access, and hold the phone still briefly. |
 | Test swing connects but ball does not launch | Wait for the laptop ball to be ready, then press the phone test button once. The hit window is intentionally generous; repeated clicks are rate-limited. |

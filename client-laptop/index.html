@@ -1,57 +1,55 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#142c29" />
-    <title>Pickleball On The Go — Court</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <div class="app-shell">
-      <header class="site-header">
-        <a class="brand" href="./" aria-label="Pickleball On The Go home">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>PICKLEBALL<span class="brand-sub">ON THE GO</span></span>
-        </a>
-        <div class="header-right"><span class="edition">THE ANYWHERE COURT</span><span class="milestone">MILESTONE 01</span></div>
-      </header>
-
-      <main>
-        <div class="page-heading">
-          <div><div class="eyebrow">LESS SETUP. MORE PLAY.</div><h1>A court. Anywhere.</h1></div>
-          <p>Your phone is the paddle.<br />Your space is the court.</p>
-        </div>
-
-        <div class="game-layout">
-          <section class="court-panel" aria-label="Live first-person pickleball court">
-            <div class="court-topline"><span class="view-label"><span class="view-icon" aria-hidden="true">⌗</span> COURT VIEW</span><span id="connection-status" class="connection-status" role="status"><i></i>Connecting</span></div>
-            <div id="court-canvas" class="court-canvas"></div>
-            <div id="render-status" class="render-status" role="status"><span class="loading-ring" aria-hidden="true"></span><strong>Getting your court ready</strong><span>Loading the 3D renderer…</span></div>
-            <div class="court-side-label" aria-hidden="true">20 FT × 44 FT · REGULATION DIMENSIONS</div>
-            <div class="court-bottomline"><div><span class="court-caption">YOUR SIDE</span><span class="court-subcaption">First-person · camera tracking optional</span></div><div class="court-key"><kbd>SPACE</kbd><span>to swing</span></div></div>
-            <div id="shot-flash" class="shot-flash" aria-hidden="true">NICE. LET IT FLY.</div>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#101a25" />
+  <title>Red vs Blue — Pickleball On The Go</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="court-panel" aria-label="Live first-person pickleball court">
+    <div id="court-canvas" class="court-canvas"></div>
+    <div id="render-status" class="render-status" role="status"><span class="loading-ring" aria-hidden="true"></span><strong>Getting your court ready</strong><span>Loading the 3D renderer…</span></div>
+    <div id="shot-flash" class="shot-flash" aria-hidden="true">NICE. LET IT FLY.</div>
             <div class="position-map" aria-label="Player position on court">
               <svg viewBox="0 0 100 220" role="img" aria-label="Court map with your position marked by a circle">
-                <rect x="3" y="3" width="94" height="214" fill="#397d76" stroke="#fff"/>
+                <rect x="3" y="3" width="94" height="214" fill="#88a881" stroke="#fff"/><path class="map-opponent" d="M3 3H97V76H3Z"/><path class="map-own" d="M3 144H97V217H3Z"/>
                 <path d="M3 76H97 M3 110H97 M3 144H97 M50 3V76 M50 144V217" stroke="#fff" fill="none"/>
                 <circle id="player-dot" cx="50" cy="194" r="7" fill="#e7f59a" stroke="#19302d" stroke-width="2"/>
               </svg><span id="position-label">You · camera off</span>
             </div>
-          </section>
+  </main>
+  <header class="game-hud" aria-label="Live match information">
+    <span id="seat-badge">CONNECTING</span>
+    <div class="scoreboard" aria-label="Red versus Blue score">
+      <div class="team-red"><span class="player-label">RED <i id="serve-a" class="serve-dot" title="Serving" aria-label="Serving"></i></span><strong id="score-a">00</strong></div>
+      <span class="score-divider">:</span>
+      <div class="team-blue"><strong id="score-b">00</strong><span class="player-label">BLUE <i id="serve-b" class="serve-dot" title="Serving" aria-label="Serving" hidden></i></span></div>
+    </div>
+    <div class="phase-indicator" role="status"><span id="phase-dot" class="phase-dot"></span><strong id="phase-title">Connecting</strong></div>
+    <span id="connection-status" class="connection-status" role="status"><i></i>Connecting</span>
+    <button id="camera-button" type="button" class="spawn-button">Enable camera</button>
+    <button id="spawn-button" class="spawn-button" type="button" disabled>New ball</button>
+  </header>
+  <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="game-sidebar" aria-expanded="false" aria-label="Open game menu">☰ <span>Menu</span></button>
+  <dialog id="game-sidebar" class="session-panel" aria-labelledby="menu-title">
+    <div class="sidebar-heading"><div><span class="eyebrow">PICKLEBALL ON THE GO</span><h1 id="menu-title">Match menu</h1></div><button id="menu-close" type="button" aria-label="Close game menu">✕</button></div>
+    <div class="session-heading"><span id="match-status">CONNECTING</span><span>Server <b id="server-number">—</b></span></div>
+    <p id="phase-description">Connect your phone to get started.</p>
+    <button id="swing-button" class="swing-button" type="button" disabled>Swing the paddle</button>
+    <p id="swing-hint">Press space or swing your phone.</p>
+    <section class="multiplayer-setup" aria-label="Connect your devices">
+      <h2>Bring your team to court</h2>
+      <p>One server. Same Wi-Fi. A laptop and phone for each player.</p>
+      <div class="device-card"><span class="eyebrow">YOUR CONTROLLER</span><h3 id="own-team-title">Your phone</h3><p>Open on your phone, enable motion, then recenter toward your laptop.</p><a class="phone-link device-link" href="/client-phone/" target="_blank" rel="noopener">Connect your phone ↗</a></div>
+      <div class="device-card"><span class="eyebrow">INVITE YOUR OPPONENT</span><h3 id="opponent-team-title">Second player</h3><p>Send these links to your friend. Run the server on only one MacBook.</p><a id="opponent-link" class="device-link" href="/client-laptop/?seat=B">Open opponent’s laptop ↗</a><a id="opponent-phone-link" class="device-link" href="/client-phone/?seat=B">Connect opponent’s phone ↗</a></div>
+      <p id="pairing-status" class="pairing-status" role="status">Waiting for device connections…</p>
+      <details><summary>Connection help &amp; switch teams</summary><p id="transport-note" class="transport-note"></p><div class="seat-links"><a id="seat-a-link" href="#">Red laptop</a><a id="seat-b-link" href="#">Blue laptop</a></div></details>
+    </section>
+    <section class="getting-started" aria-label="Keyboard controls"><h3>Playing with a keyboard?</h3><p>Click <b>New ball</b> above, then press <kbd>Space</kbd> to swing.</p></section>
 
-          <aside class="session-panel" aria-label="Session controls and score">
-            <div class="session-heading"><span class="eyebrow">YOUR MATCH</span><span id="seat-badge" class="edition">CONNECTING…</span><span id="match-status" class="session-id">CONNECTING</span></div>
-            <div class="scoreboard" aria-label="Score"><div><span class="player-label">PLAYER A <i id="serve-a" class="serve-dot" title="Serving"></i></span><strong id="score-a">00</strong></div><span class="score-divider">:</span><div><span class="player-label">PLAYER B <i id="serve-b" class="serve-dot" title="Serving" hidden></i></span><strong id="score-b">00</strong></div></div>
-            <div class="score-meta"><span>Server <b id="server-number">—</b></span><span>Shared live court</span></div>
-
-            <div class="phase-card"><div class="phase-indicator"><span id="phase-dot" class="phase-dot"></span><strong id="phase-title">Connecting to court</strong></div><p id="phase-description">The relay server will place a ball at your paddle.</p></div>
-
-            <button id="swing-button" class="swing-button" type="button" disabled><span>Swing the paddle</span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-            <button id="spawn-button" class="swing-button spawn-button" type="button" disabled>Spawn ball</button>
-            <p id="swing-hint" class="swing-hint">Spawn a ball, then swing.</p>
             <section class="tracking-controls" aria-label="Camera position tracking">
-              <button id="camera-button" type="button" class="swing-button">Enable camera</button>
               <button id="recenter-button" type="button" class="swing-button" disabled>Recenter position</button>
               <p id="tracking-status" role="status">Camera off. Enable it to track where you stand. Video stays on this laptop.</p>
               <video id="tracking-video" muted playsinline hidden></video>
@@ -66,30 +64,10 @@
               </details>
             </div>
             <div class="analytics-details"><div class="detail-heading"><span>SHOT ANALYTICS</span></div><p id="analytics-strip" class="analytics-strip">No shots classified yet.</p></div>
-            <div class="session-footer"><span class="small-ball" aria-hidden="true">●</span> One room. One shared ball.</div>
-          </aside>
-        </div>
 
-        <div class="seat-links" style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:8px 0 12px;">
-          <a id="seat-a-link" href="#">Player A laptop</a>
-          <a id="seat-b-link" href="#">Player B laptop</a>
-        </div>
-        <section class="multiplayer-setup" aria-label="Connect a second player">
-          <h3>Play with a friend</h3>
-          <p>Open this link on the other MacBook, on the same Wi-Fi. Each player opens the phone link shown on their own MacBook, enables motion, and recenters. Run the server on just one MacBook.</p>
-          <a id="opponent-link" href="/client-laptop/?seat=B">Second player link</a>
-          <p id="pairing-status" role="status">Waiting for device connections…</p>
-        </section>
-        <section class="getting-started" aria-label="Ways to play">
-          <div class="start-title"><span class="eyebrow">PICK YOUR PADDLE</span><h2>You’re one swing away.</h2></div>
-          <div class="input-option"><span class="step-number">01</span><div><h3>Try it with your keyboard</h3><p>Click Spawn ball, then press <kbd>space</kbd> to launch.<br />Request each new ball when you’re ready.</p></div></div>
-          <div class="input-option"><span class="step-number">02</span><div><h3>Bring your phone into play <a class="phone-link" href="/client-phone/" target="_blank" rel="noopener" aria-label="Open phone setup">↗</a></h3><p id="phone-help">Each player opens their own phone link.<br />Player A and Player B share the same live ball.</p></div></div>
-        </section>
-        <p id="transport-note" class="transport-note"></p>
-      </main>
-      <footer class="site-footer"><span>BUILT FOR THE JOY OF THE GAME.</span><span>120 HZ SERVER SIM <i></i> 60 HZ STATE STREAM <i></i> SAME LAN</span></footer>
-    </div>
-    <noscript><div class="script-error">Enable JavaScript to connect to the court.</div></noscript>
-    <script type="module" src="./app.js"></script>
-  </body>
+
+  </dialog>
+  <noscript><div class="script-error">Enable JavaScript to connect to the court.</div></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
 </html>

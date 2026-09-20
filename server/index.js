@@ -96,7 +96,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       res.writeHead(200, { ...headers, 'Content-Type': MIME['.json'] });
       const scheme = insecure ? 'http' : 'https';
       const activePort = req.socket.localPort || port;
-      const phone_urls = lanAddresses().map(address => `${scheme}://${address}:${activePort}/client-phone/`);
+      const phone_urls = insecure ? [] : lanAddresses().map(address => `${scheme}://${address}:${activePort}/client-phone/`);
       return res.end(JSON.stringify({ ok: true, simulation_hz: CONFIG.simulation.hz, broadcast_hz: CONFIG.simulation.broadcastHz, phone_urls }));
     }
     if (pathname === '/api/spawn' && req.method === 'POST') {
@@ -131,7 +131,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         fs.readFile(process.env.TLS_KEY || path.join(ROOT, '.certs/key.pem')),
         fs.readFile(process.env.TLS_CERT || path.join(ROOT, '.certs/cert.pem')),
       ]);
-    } catch { throw new Error('HTTPS certificates missing. Run npm run certs -- <LAN-IP> first. Use npm run dev for a localhost-only keyboard demo.'); }
+    } catch { throw new Error('HTTPS certificates missing. Run npm run certs -- <LAN-IP> first. Use npm run dev:http for a localhost-only keyboard demo.'); }
     server = https.createServer({ key, cert }, handler);
   }
   const hub = new WebSocketServer({ noServer: true, maxPayload: CONFIG.network.maxPayloadBytes });
