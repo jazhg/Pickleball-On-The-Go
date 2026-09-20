@@ -42,49 +42,95 @@ test('flat startup waits for a usable heading; invalid sensors are ignored', () 
   }
 });
 
-test('phone events send live poses and recenter without browser screen errors', async () => {
+function phoneHarness() {
+  const html = readFileSync(new URL('../client-phone/index.html', import.meta.url), 'utf8');
+  const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]));
   const nodes = new Map();
   const getNode = id => {
-    if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { add() {}, remove() {} }, addEventListener(type, handler) { this[type] = handler; } });
+    assert.ok(ids.has(id), `UI element ${id} must exist in the actual controller page`);
+    if (!nodes.has(id)) nodes.set(id, { textContent: '', addEventListener(type, handler) { this[type] = handler; } });
     return nodes.get(id);
   };
-  const events = {}, timers = [], sent = [];
+  const events = {}, timers = [], sent = [], socketEvents = {};
+  let now = 1000;
   class Socket {
     static OPEN = 1;
     readyState = 1;
-    addEventListener() {}
+    addEventListener(type, handler) { socketEvents[type] = handler; }
     send(value) { sent.push(JSON.parse(value)); }
   }
   const context = vm.createContext({
-    PaddleMotion, rotateVector, CONFIG, SwingDetector, calibratedPeakG, validCalibration,
+    PaddleMotion, rotateVector, CONFIG, SwingDetector,
     orientationQuaternion, forwardReference, relativeOrientation,
     document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
-    window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' }, isSecureContext: true,
+    window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' },
       DeviceMotionEvent: {}, DeviceOrientationEvent: {}, addEventListener(type, handler) { events[type] = handler; } },
-    screen: { orientation: { angle: 0 } }, WebSocket: Socket, URL, URLSearchParams,
-    localStorage: { getItem() { return null; } }, performance,
+    WebSocket: Socket, URL, URLSearchParams, performance: { now: () => now },
     setInterval(handler) { timers.push(handler); }, clearInterval() {}, clearTimeout() {}, setTimeout() {},
   });
-  const source = readFileSync(new URL('../client-phone/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
-  vm.runInContext(source, context);
-  await getNode('enable-button').click();
-  events.deviceorientation({ alpha: 20, beta: 0, gamma: 0 });
-  timers[0]();
-  assert.equal(sent.length, 0);
-  events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
-  timers[0]();
-  const face = message => normal({ x: message.qx, y: message.qy, z: message.qz, w: message.qw });
-  assert.equal(sent.at(-1).type, 'controller_pose');
-  near(face(sent.at(-1)), [0, 0, -1]);
-  events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  timers[0]();
-  near(face(sent.at(-1)), [-1, 0, 0]);
-  getNode('recenter-button').click();
-  near(face(sent.at(-1)), [0, 0, -1]);
-  context.screen.orientation.angle = 90;
-  events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  timers[0]();
-  near(face(sent.at(-1)), [0, 0, -1]);
+  vm.runInContext(readFileSync(new URL('../client-phone/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, ''), context);
+  return { getNode, context, events, timers, sent, advance(ms) { now += ms; },
+    message(msg) { socketEvents.message({ data: JSON.stringify(msg) }); } };
+}
+const sentNormal = msg => normal({ x: msg.qx, y: msg.qy, z: msg.qz, w: msg.qw });
+
+test('recenter waits for the aiming countdown and a fresh upright sample, then resets movement', async () => {
+  const h = phoneHarness();
+  await h.getNode('enable-button').click();
+  h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
+  h.timers[0](); near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
+  h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
+  h.timers[0](); near(sentNormal(h.sent.at(-1)), [-1, 0, 0]);
+  h.getNode('recenter-button').click();
+  assert.match(h.getNode('recenter-button').textContent, /2/);
+  h.advance(1000);
+  h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
+  h.timers[0](); near(sentNormal(h.sent.at(-1)), [-1, 0, 0]);
+  h.advance(1100); h.timers[1]();
+  assert.doesNotMatch(h.getNode('sensor-detail').textContent, /Forward set/);
+  h.events.deviceorientation({ alpha: 110, beta: 0, gamma: 0 });
+  assert.doesNotMatch(h.getNode('sensor-detail').textContent, /Forward set/);
+  h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
+  near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
+  assert.deepEqual([h.sent.at(-1).px, h.sent.at(-1).py, h.sent.at(-1).pz], [0, 0, 0]);
+  assert.match(h.getNode('sensor-detail').textContent, /Forward set/);
+  assert.equal(h.getNode('recenter-button').disabled, false);
+});
+
+test('stale sensors cannot report calibration success and pending recenter expires', async () => {
+  const h = phoneHarness(); await h.getNode('enable-button').click();
+  h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
+  h.advance(600); h.getNode('recenter-button').click();
+  assert.match(h.getNode('sensor-detail').textContent, /No fresh/);
+  h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
+  h.getNode('recenter-button').click();
+  h.advance(7100); h.timers[1]();
+  assert.match(h.getNode('sensor-detail').textContent, /No valid reading/);
+  assert.equal(h.getNode('recenter-button').textContent, 'Recenter paddle');
+});
+
+test('denied orientation permission remains retryable', async () => {
+  const h = phoneHarness();
+  h.context.window.DeviceOrientationEvent.requestPermission = async () => 'denied';
+  await h.getNode('enable-button').click();
+  assert.match(h.getNode('permission-error').textContent, /Allow both/);
+  assert.equal(h.events.deviceorientation, undefined);
+  h.context.window.DeviceOrientationEvent.requestPermission = async () => 'granted';
+  await h.getNode('enable-button').click();
+  assert.equal(typeof h.events.deviceorientation, 'function');
+});
+
+test('compact remote displays the local score and sends legal manual swings', () => {
+  const h = phoneHarness();
+  h.message({ type: 'hello', player: 'B' });
+  h.message({ type: 'state', phase: 'ready', ready_for: 'B', score: [2, 3] });
+  assert.equal(h.getNode('your-score').textContent, 3);
+  assert.equal(h.getNode('their-score').textContent, 2);
+  assert.equal(h.getNode('synthetic-button').disabled, false);
+  h.getNode('synthetic-button').click();
+  assert.equal(h.sent.at(-1).type, 'swing');
+  h.message({ type: 'state', phase: 'rally', last_hitter: 'B', score: [2, 3] });
+  assert.equal(h.getNode('synthetic-button').disabled, true);
 });
 
 test('upside-down recentering is rejected', () => {
