@@ -116,7 +116,8 @@ let trackingRenderState = {
 };
 let controllerPose = { qx: 0, qy: 0, qz: 0, qw: 1 };
 let practiceEnabled = false;
-let phoneBaseURL = new URL('/client-phone/', location.href);
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+let phoneBaseURL = LOCAL_HOSTS.has(location.hostname) ? null : new URL('/client-phone/', location.href);
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
   spawnButton.disabled = true;
@@ -146,6 +147,14 @@ function updateMinimap(pose) {
   dot.setAttribute('cy', 110 + seatSign * pose.court_y / CONFIG.court.length * 214);
 }
 function updatePhoneLinks() {
+  if (!phoneBaseURL) {
+    document.querySelectorAll('.phone-link, #opponent-phone-link').forEach(link => {
+      link.removeAttribute('href');
+      link.textContent = 'Finding this laptop’s LAN address…';
+      link.setAttribute('aria-disabled', 'true');
+    });
+    return;
+  }
   const url = new URL(phoneBaseURL);
   if (localPlayer) url.searchParams.set('seat', localPlayer);
   document.querySelectorAll('.phone-link').forEach((link) => {
@@ -169,15 +178,25 @@ function updatePhoneLinks() {
   document.getElementById('opponent-team-title').textContent = `${teamName(localPlayer === 'B' ? 'A' : 'B')} · Opponent`;
 }
 async function discoverPhoneURL() {
-  if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return;
+  if (!LOCAL_HOSTS.has(location.hostname)) return;
   try {
     const response = await fetch('/health');
     const health = await response.json();
     if (Array.isArray(health.phone_urls) && health.phone_urls.length) {
       phoneBaseURL = new URL(health.phone_urls[0]);
       updatePhoneLinks();
+    } else {
+      document.querySelectorAll('.phone-link').forEach(link => {
+        link.textContent = 'Start with npm start to get the HTTPS LAN link';
+        link.title = 'The localhost keyboard server cannot accept phone connections.';
+      });
     }
-  } catch { /* Keep the current-origin fallback if LAN discovery is unavailable. */ }
+  } catch {
+    document.querySelectorAll('.phone-link').forEach(link => {
+      link.textContent = 'Host IP unavailable — use the HTTPS LAN link from npm start';
+      link.title = 'The phone must use the host IP, never localhost.';
+    });
+  }
 }
 
 setupTracking({ onPose(pose, trackingState) {
@@ -445,11 +464,11 @@ window.addEventListener('pageshow', (event) => {
 
 const phoneLink = document.createElement('a');
 phoneLink.className = 'phone-link';
-phoneLink.href = phoneBaseURL.href;
-phoneLink.textContent = phoneBaseURL.href;
+phoneLink.href = phoneBaseURL?.href || '#';
+phoneLink.textContent = phoneBaseURL?.href || 'Finding this laptop’s LAN address…';
 phoneLink.target = '_blank';
 phoneLink.rel = 'noopener';
-const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const isLocalhost = LOCAL_HOSTS.has(location.hostname);
 const seatAURL = new URL('/client-laptop/', location.href);
 const seatBURL = new URL('/client-laptop/', location.href);
 seatAURL.searchParams.set('seat', 'A');
