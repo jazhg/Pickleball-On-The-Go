@@ -66,6 +66,15 @@ export function relativeOrientation(current, reference) {
   return normalizeQuaternion(multiplyQuaternion({ x: -neutral.x, y: -neutral.y, z: -neutral.z, w: neutral.w }, q));
 }
 
+// Full grip reference for aiming. The captured grip becomes an upright paddle
+// facing into the court (-Z), including when the hand has some pitch or roll.
+// Do not use this reference for acceleration: gravity needs heading-only alignment.
+export function paddleReference(q) {
+  const grip = normalizeQuaternion(q);
+  if (!grip || !forwardReference(grip)) return null;
+  return normalizeQuaternion(multiplyQuaternion(grip, { x: 0, y: -1, z: 0, w: 0 }));
+}
+
 export function orientationBasis(q) {
   const normalized = normalizeQuaternion(q);
   return normalized ? basisFor(normalized) : null;

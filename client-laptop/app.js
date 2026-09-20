@@ -111,7 +111,7 @@ let rendererReady = false;
 let rendererFailed = false;
 let playerPosition = { x: CONFIG.player.x, z: CONFIG.player.homeDepth };
 let trackingRenderState = { wristOffset: { ...CONFIG.render.neutralPaddleOffset }, jumpHeight: 0 };
-let controllerPose = { qx: 0, qy: 0, qz: 0, qw: 1 };
+let controllerPose = { qx: 0, qy: 1, qz: 0, qw: 0, px: 0, py: 0, pz: 0 };
 let phoneBaseURL = new URL('/client-phone/', location.href);
 const spawnButton = document.getElementById('spawn-button');
 spawnButton.addEventListener('click', () => {
@@ -656,7 +656,8 @@ function createCourt(THREE) {
     camera.position.lerp(cameraTarget, CONFIG.render.cameraAlpha);
     // Lateral tracking is already filtered; avoid a second delay in the view.
     camera.position.x = cameraTarget.x;
-    camera.lookAt(playerPosition.x * 0.3, 1.0, playerPosition.z + attack * 6);
+    // Camera heading must share the controller's forward axis at every position.
+    camera.lookAt(playerPosition.x, 1.0, playerPosition.z + attack * 6);
     const center = paddleCenter(playerPosition, localPlayer, paddleMotion);
     const ownColor = localPlayer === 'B' ? '#438ef5' : '#f05c65';
     const otherColor = localPlayer === 'B' ? '#f05c65' : '#438ef5';

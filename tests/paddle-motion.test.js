@@ -50,3 +50,17 @@ test('motion payload requires three finite bounded offsets', () => {
   assert.equal(validMessage({ ...pose, px: 0.2, py: -0.2, pz: 0.3 }), true);
   for (const bad of [{ px: 0.1 }, { px: 4, py: 0, pz: 0 }, { px: 0, py: NaN, pz: 0 }]) assert.equal(validMessage({ ...pose, ...bad }), false);
 });
+
+test('paddle reset centers ahead of either player without changing body position', () => {
+  for (const player of ['A', 'B']) {
+    const sim = new Simulation();
+    sim.setPose({ t: 1, type: 'pose', court_x: 1.2, court_y: 4.5, torso_deg: 15, wrist_h: 1 }, player);
+    const before = structuredClone(sim.players);
+    sim.setController({ t: 2, type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0, px: 0.3, py: 0.2, pz: 0.3 }, player);
+    sim.setController({ t: 3, type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0, px: 0, py: 0, pz: 0 }, player);
+    assert.deepEqual(sim.players, before);
+    assert.equal(sim.paddle(player).x, before[player].court_x);
+    const sign = player === 'A' ? 1 : -1;
+    assert.ok((sim.paddle(player).z - before[player].court_y) * sign < 0);
+  }
+});

@@ -1,5 +1,5 @@
 import { PaddleMotion, rotateVector } from '/shared/paddle-motion.js';
-import { orientationQuaternion, forwardReference, relativeOrientation } from '/shared/controller-orientation.js';
+import { orientationQuaternion, forwardReference, paddleReference, relativeOrientation } from '/shared/controller-orientation.js';
 import { CONFIG } from '/shared/config.js';
 import { SwingDetector } from '/shared/swing-detector.js';
 
@@ -25,6 +25,7 @@ let lastHitter = null;
 let latestOrientation = null;
 let latestOrientationAt = -Infinity;
 let neutralOrientation = null;
+let neutralPaddleOrientation = null;
 let controllerTimer = null;
 let pendingRecenter = null;
 let enablingMotion = false;
@@ -181,7 +182,11 @@ function beginRecenter() {
     ui.sensorDetail.textContent = 'No fresh orientation reading. Keep this page open and try again.'; return;
   }
   pendingRecenter = { captureAfter: now + 2000, expiresAt: now + 7000 };
-  ui.sensorDetail.textContent = 'Face the phone’s screen toward the laptop and hold it upright.';
+  paddleMotion.reset();
+  detector.reset();
+  lastMotionSwingAt = now;
+  sendControllerPose();
+  ui.sensorDetail.textContent = 'Turn the SCREEN toward the laptop, top edge up. Hold your normal grip until the countdown finishes. Only the paddle resets.';
   updateMotionStatus(); updateBallControls();
 }
 
@@ -194,22 +199,33 @@ function onOrientation(event) {
     const reference = forwardReference(q);
     if (reference) {
       neutralOrientation = reference;
+      neutralPaddleOrientation = paddleReference(q);
       paddleMotion.reset(); detector.reset(); lastMotionSwingAt = latestOrientationAt;
       pendingRecenter = null;
       ui.recenter.textContent = 'Recenter paddle';
-      ui.sensorDetail.textContent = 'Forward set ✓ Tilt and swing to play.';
+      ui.sensorDetail.textContent = 'Forward set ✓ Your grip is centered. Tilt and swing to play.';
       sendControllerPose(); updateBallControls();
     }
   } else if (!neutralOrientation) {
     neutralOrientation = forwardReference(q);
+    neutralPaddleOrientation = paddleReference(q);
     if (neutralOrientation) ui.sensorDetail.textContent = 'Motion ready. Recenter to set your forward direction.';
   }
   updateMotionStatus();
 }
 function sendControllerPose() {
+  if (pendingRecenter) {
+    // Reset the model immediately and hold it at home during the countdown.
+    // Repeat with the pose stream so relay throttling cannot lose the reset.
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
+      t: Date.now(), type: 'controller_pose', qx: 0, qy: 1, qz: 0, qw: 0,
+      px: 0, py: 0, pz: 0,
+    }));
+    return;
+  }
   if (!latestOrientation || !neutralOrientation || socket?.readyState !== WebSocket.OPEN) return;
   if (performance.now() - latestOrientationAt > CONFIG.controller.poseTimeoutMs) return;
-  const q = relativeOrientation(latestOrientation, neutralOrientation);
+  const q = relativeOrientation(latestOrientation, neutralPaddleOrientation);
   if (!q) return;
   socket.send(JSON.stringify({ t: Date.now(), type: 'controller_pose', qx: q.x, qy: q.y, qz: q.z, qw: q.w, ...paddleMotion.pose() }));
 }

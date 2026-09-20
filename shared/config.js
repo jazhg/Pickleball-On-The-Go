@@ -68,7 +68,7 @@ export const CONFIG = Object.freeze({
     paddlePositionAlpha: 0.34, // Render interpolation only; tracker dynamics are limited separately below.
     paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
     // Face center relative to the player, shared by renderer and ball contacts.
-    neutralPaddleOffset: { x: 0.42, y: -0.60, z: -1.05 },
+    neutralPaddleOffset: { x: 0, y: -0.60, z: -1.05 },
     maxWristOffset: { x: 0.42, y: 0.32, z: 0.22 }, // Final camera-local safety bounds around neutral.
   },
   tracking: {

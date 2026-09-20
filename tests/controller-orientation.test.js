@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { CONFIG } from '../shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '../shared/swing-detector.js';
-import { orientationQuaternion, forwardReference, relativeOrientation } from '../shared/controller-orientation.js';
+import { orientationQuaternion, forwardReference, paddleReference, relativeOrientation } from '../shared/controller-orientation.js';
 
 const orientation = (alpha, beta = 90, gamma = 0) => orientationQuaternion({ alpha, beta, gamma });
 const normal = q => [2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y)];
@@ -61,7 +61,7 @@ function phoneHarness() {
   }
   const context = vm.createContext({
     PaddleMotion, rotateVector, CONFIG, SwingDetector,
-    orientationQuaternion, forwardReference, relativeOrientation,
+    orientationQuaternion, forwardReference, paddleReference, relativeOrientation,
     document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
     window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' },
       DeviceMotionEvent: {}, DeviceOrientationEvent: {}, addEventListener(type, handler) { events[type] = handler; } },
@@ -85,7 +85,7 @@ test('recenter waits for the aiming countdown and a fresh upright sample, then r
   assert.match(h.getNode('recenter-button').textContent, /2/);
   h.advance(1000);
   h.events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  h.timers[0](); near(sentNormal(h.sent.at(-1)), [-1, 0, 0]);
+  h.timers[0](); near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
   h.advance(1100); h.timers[1]();
   assert.doesNotMatch(h.getNode('sensor-detail').textContent, /Forward set/);
   h.events.deviceorientation({ alpha: 110, beta: 0, gamma: 0 });
@@ -153,5 +153,61 @@ test('tilted calibration preserves gravity and forward motion for the movement d
     }
     assert.ok(motion.pose().pz < 0, 'screen-forward acceleration moves into the court');
     assert.equal(hits, 1);
+  }
+});
+
+test('recenter zeros pitch and roll for a comfortable grip at any heading', () => {
+  for (const heading of [0, 37, 180, 359]) {
+    for (const [beta, gamma] of [[60, 20], [110, -25], [90, 0]]) {
+      const grip = orientation(heading, beta, gamma);
+      const neutral = relativeOrientation(grip, paddleReference(grip));
+      near(normal(neutral), [0, 0, -1]);
+      const up = rotateVector({ x: 0, y: 1, z: 0 }, neutral);
+      near([up.x, up.y, up.z], [0, 1, 0]);
+      const turned = relativeOrientation(orientation(heading + 25, beta, gamma), paddleReference(grip));
+      assert.ok(Math.abs(normal(turned)[0]) > 0.2, 'aim must still follow turns after centering');
+    }
+  }
+});
+
+test('phone recenter sends a level paddle without turning gravity into motion', async () => {
+  const h = phoneHarness();
+  await h.getNode('enable-button').click();
+  h.events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
+  h.getNode('recenter-button').click();
+  h.advance(2100);
+  const sample = { alpha: 110, beta: 60, gamma: 20 };
+  h.events.deviceorientation(sample);
+  near(sentNormal(h.sent.at(-1)), [0, 0, -1]);
+  const absolute = orientationQuaternion(sample);
+  const gravity = rotateVector({ x: 0, y: CONFIG.physics.gravity, z: 0 },
+    { x: -absolute.x, y: -absolute.y, z: -absolute.z, w: absolute.w });
+  for (let i = 0; i < 10; i++) {
+    h.advance(20);
+    h.events.devicemotion({ accelerationIncludingGravity: gravity, acceleration: null, rotationRate: {} });
+  }
+  h.timers[0]();
+  near([h.sent.at(-1).px, h.sent.at(-1).py, h.sent.at(-1).pz], [0, 0, 0]);
+});
+
+test('recenter immediately returns the model home and holds it through the countdown', async () => {
+  const h = phoneHarness();
+  await h.getNode('enable-button').click();
+  h.events.deviceorientation({ alpha: 0, beta: 90, gamma: 0 });
+  for (let i = 0; i < 8; i++) {
+    h.advance(20);
+    h.events.devicemotion({ accelerationIncludingGravity: { x: 4, y: 9.81, z: 0 }, acceleration: { x: 4, y: 0, z: 0 }, rotationRate: {} });
+  }
+  h.events.deviceorientation({ alpha: 70, beta: 60, gamma: 10 });
+  h.timers[0]();
+  assert.ok(Math.abs(h.sent.at(-1).px) > 0.01);
+  h.getNode('recenter-button').click();
+  for (let i = 0; i < 5; i++) {
+    const pose = h.sent.at(-1);
+    near(sentNormal(pose), [0, 0, -1]);
+    near([pose.px, pose.py, pose.pz], [0, 0, 0]);
+    h.advance(100);
+    h.events.deviceorientation({ alpha: i * 10, beta: 70, gamma: 15 });
+    h.timers[0]();
   }
 });
