@@ -184,13 +184,16 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       if (msg.type === 'controller_pose') {
         if (ws.role !== 'phone') return;
         const now = performance.now();
+        const pose = normalizeControllerPose(msg);
+        if (!pose) return;
+        // Keep contact aim fresh even when visual updates exhaust the relay budget.
+        ws.controllerPose = pose;
+        ws.controllerPoseAt = now;
         ws.controllerTokens = Math.min(CONFIG.network.controllerRateBurst,
           ws.controllerTokens + (now - ws.controllerRefillAt) * CONFIG.network.controllerHz / 1000);
         ws.controllerRefillAt = now;
         if (ws.controllerTokens < 1) return;
         ws.controllerTokens -= 1;
-        const pose = normalizeControllerPose(msg);
-        if (!pose) return;
         const text = JSON.stringify(pose);
         for (const client of hub.clients) {
           if (client.role !== 'laptop' || client.player !== ws.player || client.readyState !== WebSocket.OPEN || client.bufferedAmount >= 65536) continue;
@@ -202,7 +205,9 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         ws.lastSwing = now;
         const seat = ws.player || 'A';
         const phaseBefore = sim.phase;
-        const accepted = sim.swing(msg, seat);
+        const aim = ws.role === 'phone' && now - ws.controllerPoseAt <= CONFIG.controller.poseTimeoutMs
+          ? ws.controllerPose : null;
+        const accepted = sim.swing(msg, seat, aim);
         const horizontal = accepted ? Math.hypot(sim.ball.vx, sim.ball.vz) : 0;
         const shot = {
           type: 'shot', id: nextShotId++, t: msg.t, source: ws.role, accepted,

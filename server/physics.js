@@ -1,3 +1,4 @@
+import { normalizeControllerPose } from '../shared/protocol.js';
 import { CONFIG } from '../shared/config.js';
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const radians = deg => deg * Math.PI / 180;
@@ -93,7 +94,7 @@ export class Simulation {
     if (pose) return { x: pose.court_x, y: pose.wrist_h, z: pose.court_y };
     return { x: p.x, y: p.paddleHeight, z: seatSign(player) * p.homeDepth };
   }
-  swing(msg, player = 'A') {
+  swing(msg, player = 'A', controllerPose = null) {
     const canServe = this.phase === 'ready' && this.readyFor === player;
     const canReturn = this.phase === 'rally' && this.lastHitter !== player;
     if (!canServe && !canReturn) return false;
@@ -106,10 +107,19 @@ export class Simulation {
     const pose = this.players[player];
 
     const speed = speedFromPeak(msg.peak_g, this.config.calibration);
-    const facePitch = Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
+    const controller = normalizeControllerPose(controllerPose);
+    // Controller +Z is the phone screen normal in the player's view. Seat B's
+    // view reverses court X/Z, but both seats share the same up direction.
+    const face = controller && {
+      x: 2 * (controller.qx * controller.qz + controller.qw * controller.qy),
+      y: 2 * (controller.qy * controller.qz - controller.qw * controller.qx),
+      z: 1 - 2 * (controller.qx ** 2 + controller.qy ** 2),
+    };
+    const facePitch = face ? Math.asin(clamp(face.y, -1, 1)) * 180 / Math.PI
+      : Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = radians(clamp((pose?.torso_deg || 0) * c.torsoGain + msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const azimuth = face ? Math.atan2(face.x, -face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain + msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
 
     const raw = {
@@ -125,7 +135,11 @@ export class Simulation {
       vy: (c.ballRadius - ball.y) / flight + c.gravity * flight / 2,
       vz: (targetZ - ball.z) / flight,
     };
-    for (const axis of ['vx', 'vy', 'vz']) ball[axis] = raw[axis] * (1 - c.aimAssist) + aimed[axis] * c.aimAssist;
+    for (const axis of ['vx', 'vy', 'vz']) {
+      // Preserve the paddle's horizontal bearing; assistance supplies loft only.
+      const assist = face && axis !== 'vy' ? 0 : c.aimAssist;
+      ball[axis] = raw[axis] * (1 - assist) + aimed[axis] * assist;
+    }
     const magnitude = Math.hypot(ball.vx, ball.vy, ball.vz);
     const adjusted = clamp(magnitude, c.minSpeed, Math.min(this.config.calibration.powerCap, c.maxSpeed));
     for (const axis of ['vx', 'vy', 'vz']) ball[axis] *= adjusted / magnitude;

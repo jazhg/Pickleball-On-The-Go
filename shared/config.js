@@ -100,6 +100,7 @@ export const CONFIG = Object.freeze({
     heartbeatMs: 15000, // 10000–30000: close abandoned sockets.
   },
   controller: {
+    poseTimeoutMs: 500, // Ignore stale orientation when sensors stop delivering samples.
     // Euler sign hooks for device-specific playtesting; orientation uses Z-X-Y conversion.
     ios: { alpha: 1, beta: 1, gamma: 1 },
     android: { alpha: 1, beta: 1, gamma: 1 },

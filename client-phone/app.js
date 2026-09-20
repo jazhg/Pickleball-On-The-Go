@@ -1,3 +1,4 @@
+import { orientationQuaternion, forwardReference, relativeOrientation } from '/shared/controller-orientation.js';
 import { CONFIG } from '/shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '/shared/swing-detector.js';
 
@@ -179,7 +180,7 @@ async function enableMotion() {
       controllerTimer = setInterval(sendControllerPose, 1000 / CONFIG.network.controllerHz);
       ui.enable.textContent = 'Motion access enabled ✓'; ui.enable.disabled = true;
       ui.recenter.disabled = false;
-      ui.sensorDetail.textContent = 'Hold the phone still for about one second, then swing with the phone as your paddle face.';
+      ui.sensorDetail.textContent = 'Hold the phone upright with its screen facing the laptop. Tap Recenter paddle to set forward, then swing.';
       clearInterval(sensorTimer); sensorTimer = setInterval(() => {
         if (motionStarted && lastSensorAt && performance.now() - lastSensorAt > CONFIG.swing.sensorTimeoutMs) {
           ui.sensorDetail.textContent = 'Permission is granted, but no recent motion samples arrived. Keep Safari open and check iOS Settings → Safari → Motion & Orientation Access.';
@@ -190,43 +191,12 @@ async function enableMotion() {
   } catch (error) { setPermissionError(`Safari did not grant motion access: ${error?.message || 'permission request failed'}.`); }
 }
 
-const multiplyQuaternion = (a, b) => ({
-  x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-  y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-  z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-  w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-});
-function normalizeQuaternion(q) {
-  const length = Math.hypot(q.x, q.y, q.z, q.w);
-  return Number.isFinite(length) && length > 1e-5 ? { x: q.x / length, y: q.y / length, z: q.z / length, w: q.w / length } : null;
-}
-function axisQuaternion(x, y, z, angle) {
-  const half = angle / 2, s = Math.sin(half);
-  return { x: x * s, y: y * s, z: z * s, w: Math.cos(half) };
-}
-function orientationQuaternion(event) {
-  if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return null;
-  const platform = /iPad|iPhone|iPod/.test(navigator.userAgent) ? CONFIG.controller.ios : CONFIG.controller.android;
-  const rad = Math.PI / 180;
-  const alpha = event.alpha * platform.alpha * rad;
-  const beta = event.beta * platform.beta * rad;
-  const gamma = event.gamma * platform.gamma * rad;
-  // Equivalent to the established DeviceOrientationControls Y-X-Z mapping.
-  let q = multiplyQuaternion(axisQuaternion(0, 1, 0, alpha), axisQuaternion(1, 0, 0, beta));
-  q = multiplyQuaternion(q, axisQuaternion(0, 0, 1, -gamma));
-  q = multiplyQuaternion(q, axisQuaternion(1, 0, 0, -Math.PI / 2));
-  const screen = Number(screen.orientation?.angle ?? window.orientation ?? 0) * rad;
-  return normalizeQuaternion(multiplyQuaternion(q, axisQuaternion(0, 0, 1, -screen)));
-}
 function onOrientation(event) {
-  const q = orientationQuaternion(event);
+  const platform = /iPad|iPhone|iPod/.test(navigator.userAgent) ? CONFIG.controller.ios : CONFIG.controller.android;
+  const q = orientationQuaternion(event, platform);
   if (!q) return;
   latestOrientation = q;
-  if (!neutralOrientation) neutralOrientation = q;
-}
-function relativeOrientation(current, neutral) {
-  const inverse = { x: -neutral.x, y: -neutral.y, z: -neutral.z, w: neutral.w };
-  return normalizeQuaternion(multiplyQuaternion(inverse, current));
+  if (!neutralOrientation) neutralOrientation = forwardReference(q);
 }
 function sendControllerPose() {
   if (!latestOrientation || !neutralOrientation || socket?.readyState !== WebSocket.OPEN) return;
@@ -283,6 +253,8 @@ function sendSwing(swing, synthetic) {
   const peak = synthetic ? CONFIG.swing.synthetic.peak_g : calibratedPeakG(rawPeak, calibration, CONFIG);
   const message = { t: Date.now(), type: 'swing', peak_g: peak, pitch: Number(swing.pitch) || 0, roll: Number(swing.roll) || 0, yaw_rate: Number(swing.yaw_rate) || 0, duration_ms: Number(swing.duration_ms) || 1 };
   if (socket?.readyState !== WebSocket.OPEN) { ui.sendBadge.textContent = 'OFFLINE'; ui.sendBadge.className = 'small-badge bad'; ui.sendDetail.textContent = 'Swing detected, but the relay is not connected. Reconnect to the laptop and try again.'; return false; }
+  // WebSocket ordering gives the relay the contact orientation before the swing.
+  sendControllerPose();
   socket.send(JSON.stringify(message));
   ui.sendBadge.textContent = 'SENT'; ui.sendBadge.className = 'small-badge good';
   ui.sendDetail.textContent = `${synthetic ? 'Synthetic' : 'Motion'} swing sent · ${peak.toFixed(2)}g · pitch ${message.pitch.toFixed(1)}°. Watch the laptop court.`;
@@ -290,7 +262,16 @@ function sendSwing(swing, synthetic) {
 }
 
 ui.enable.addEventListener('click', enableMotion);
-ui.recenter.addEventListener('click', () => { if (latestOrientation) neutralOrientation = { ...latestOrientation }; });
+ui.recenter.addEventListener('click', () => {
+  const reference = latestOrientation && forwardReference(latestOrientation);
+  if (!reference) {
+    ui.sensorDetail.textContent = 'Hold the phone upright with its screen facing the laptop, then tap Recenter paddle.';
+    return;
+  }
+  neutralOrientation = reference;
+  ui.sensorDetail.textContent = 'Forward direction set. The paddle now follows the phone’s screen.';
+  sendControllerPose();
+});
 ui.calibrate.addEventListener('click', beginCalibration);
 ui.skip.addEventListener('click', () => {
   calibrationMode = false; calibration = null;
