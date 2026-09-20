@@ -9,7 +9,9 @@ export const CONFIG = Object.freeze({
     hz: 120, broadcastHz: 60, poseHz: 15,
     maxCatchupSeconds: 0.1, // 0.05–0.25: cap work after event-loop stalls.
     resetDelaySeconds: 1.7, // 1–3: show the final bounce, then wait for a spawn request.
-    maxFlightSeconds: 8, // 5–12: recover from a ball that never settles.
+    stationaryTimeoutSeconds: 3, // 2–5: make respawn available after a grounded ball settles.
+    stationarySpeed: 0.12, // 0.06–0.2 m/s: treat tiny physics jitter as motionless.
+    stationaryGroundTolerance: 0.012, // 0.005–0.025 m: maximum height above the floor while settled.
   },
   physics: {
     gravity: 9.81,

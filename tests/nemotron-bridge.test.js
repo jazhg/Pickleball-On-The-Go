@@ -93,7 +93,7 @@ test('wall bot returns the first far-side bounce and schedules one return only',
   assert.equal(sim.botReturn(), false, 'no returns once the rally is over');
 });
 
-test('full relay loop: swing -> classification -> bot rally -> ruling with side-out', async () => {
+test('full relay loop continues after the near bounce and rules only after an out landing', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const port = relay.server.address().port;
   const endpoint = `http://127.0.0.1:${port}`;
@@ -123,13 +123,16 @@ test('full relay loop: swing -> classification -> bot rally -> ruling with side-
     });
     assert.ok(validMessage(ruling), 'ruling must match the frozen wire schema');
     assert.equal(ruling.fault, true);
-    assert.equal(ruling.side_out, true);
-    assert.deepEqual(ruling.score, [0, 0]);
-    // Serving flipped A -> B, exposed through the existing 1/2 server numbers.
+    assert.equal(relay.sim.events.at(-1).reason, 'out');
+    assert.ok(relay.sim.events.some(e => e.type === 'bounce' && e.in_bounds && e.z > 0));
+    assert.equal(ruling.player, 'B');
+    assert.equal(ruling.side_out, false);
+    assert.deepEqual(ruling.score, [1, 0]);
+    // B's return eventually goes out; A retains serve.
     const states = seen.filter((m) => m.type === 'state');
-    assert.ok(states.some((s) => s.server === 2), 'server number flips to 2 after side-out');
-    assert.deepEqual(relay.sim.score, [0, 0]);
-    assert.equal(relay.sim.servingTeam, 'B');
+    assert.ok(states.every((s) => s.server === 1));
+    assert.deepEqual(relay.sim.score, [1, 0]);
+    assert.equal(relay.sim.servingTeam, 'A');
     const evidence = seen.find((m) => m.type === 'ruling_evidence');
     assert.ok(evidence && validMessage(evidence), 'evidence panel payload must validate');
     assert.ok(evidence.trigger_events.length >= 3, 'timeline shows the rally sequence');

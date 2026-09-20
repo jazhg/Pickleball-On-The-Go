@@ -5,6 +5,53 @@ import { CONFIG } from '../shared/config.js';
 import { validMessage, parseMessage } from '../shared/protocol.js';
 const swing = { t: 1234567, type: 'swing', ...CONFIG.swing.synthetic };
 
+test('in-bounds ball keeps bouncing beyond two bounces and only an out landing ends it', () => {
+  const sim = new Simulation();
+  sim.phase = 'rally';
+  sim.ball = { x: 0, y: 1, z: 3, vx: 0, vy: 0, vz: 0 };
+  for (let i = 0; i < 300; i++) sim.step();
+  assert.ok(sim.bounces > 2);
+  assert.equal(sim.phase, 'rally');
+  assert.equal(sim.spawn(), false);
+  assert.equal(sim.events.some(e => e.type === 'rally_end'), false);
+  sim.ball.x = CONFIG.court.width;
+  sim.ball.y = CONFIG.physics.ballRadius;
+  sim.ball.vy = -1;
+  sim.step();
+  assert.equal(sim.phase, 'reset');
+  assert.equal(sim.events.at(-1).reason, 'out');
+  for (let i = 0; i < 300; i++) sim.step();
+  assert.equal(sim.phase, 'idle');
+  assert.equal(sim.spawn(), true);
+});
+
+test('a motionless grounded ball enables respawn after three seconds', () => {
+  const sim = new Simulation();
+  sim.phase = 'rally';
+  sim.ball = { x: 0, y: CONFIG.physics.ballRadius, z: 2, vx: 0, vy: 0, vz: 0 };
+  const nearlyThreeSeconds = CONFIG.simulation.hz * CONFIG.simulation.stationaryTimeoutSeconds - 1;
+  for (let i = 0; i < nearlyThreeSeconds; i++) sim.step();
+  assert.equal(sim.phase, 'rally');
+  assert.equal(sim.spawn(), false);
+  for (let i = 0; i < 3; i++) sim.step();
+  assert.equal(sim.phase, 'idle');
+  assert.equal(sim.events.at(-1).reason, 'stopped');
+  assert.equal(sim.spawn(), true);
+});
+
+test('bot return rebounds on the near court and allows a player return', () => {
+  const sim = new Simulation();
+  sim.phase = 'rally'; sim.lastHitter = 'A'; sim.bounces = 1;
+  sim.ball = { x: 0, y: 0.5, z: -3, vx: 0, vy: 0, vz: 0 };
+  assert.equal(sim.botReturn(), true);
+  assert.equal(sim.lastHitter, 'B');
+  for (let i = 0; i < 240 && sim.bounces === 0; i++) sim.step();
+  assert.equal(sim.phase, 'rally');
+  assert.ok(sim.ball.z > 0 && sim.ball.vy > 0);
+  Object.assign(sim.ball, sim.paddle('A'));
+  assert.equal(sim.swing(swing, 'A'), true);
+});
+
 test('keyboard swing clears net, bounces inside far court, then waits for spawn', () => {
   const sim = new Simulation();
   assert.equal(sim.phase, 'idle');
@@ -35,7 +82,7 @@ test('extreme phone angles and force cannot launch the ball above two meters', (
     const sim = new Simulation(); sim.spawn(); sim.swing({ ...swing, peak_g: 12.61, pitch });
     assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
     assert.equal(sim.swing(swing), false, 'ignore follow-through contacts during flight');
-    while (sim.phase === 'rally') { sim.step(); assert.ok(sim.ball.y < 2, `too high at pitch ${pitch}`); }
+    for (let i = 0; i < 2400 && sim.phase === 'rally'; i++) { sim.step(); assert.ok(sim.ball.y < 2, `too high at pitch ${pitch}`); }
   }
 });
 test('ready ball follows the tracked player; airborne ball does not', () => {

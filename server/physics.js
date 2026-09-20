@@ -32,6 +32,7 @@ export class Simulation {
     this.bounces = 0;
     this.age = 0;
     this.resetIn = 0;
+    this.stationaryFor = 0;
     this.events = [];
   }
   // Wall bot ("B"): one return of the first in-bounds far-side bounce, ~0.35 s later,
@@ -43,6 +44,10 @@ export class Simulation {
     this.ball.vx = (targetX - this.ball.x) / flight;
     this.ball.vz = (targetZ - this.ball.z) / flight;
     this.ball.vy = (this.config.physics.ballRadius - this.ball.y) / flight + this.config.physics.gravity * flight / 2;
+    this.lastHitter = 'B';
+    this.readyFor = null;
+    this.bounces = 0;
+    this.stationaryFor = 0;
     this.events.push({ type: 'contact', player: 'B', time: this.age, ball: { ...this.ball } });
     return true;
   }
@@ -56,6 +61,7 @@ export class Simulation {
     this.events = [];
     this.bounces = 0;
     this.age = 0;
+    this.stationaryFor = 0;
     this.phase = 'ready';
     this.readyFor = player;
     this.lastHitter = null;
@@ -130,12 +136,13 @@ export class Simulation {
     this.lastHitter = player;
     this.bounces = 0;
     this.age = 0;
+    this.stationaryFor = 0;
     this.events.push({ type: 'contact', player, time: this.age, ball: { ...ball }, swing: { ...msg } });
     return true;
   }
-  finish(reason) {
+  finish(reason, resetDelay = this.config.simulation.resetDelaySeconds) {
     this.phase = 'reset';
-    this.resetIn = this.config.simulation.resetDelaySeconds;
+    this.resetIn = resetDelay;
     this.events.push({ type: 'rally_end', reason, time: this.age });
   }
   step(dt = 1 / this.config.simulation.hz) {
@@ -167,9 +174,15 @@ export class Simulation {
       this.bounces++;
       const inBounds = Math.abs(b.x) <= court.width / 2 + c.ballRadius && Math.abs(b.z) <= court.length / 2 + c.ballRadius;
       this.events.push({ type: 'bounce', time: this.age, x: b.x, z: b.z, in_bounds: inBounds });
-      if (!inBounds || this.bounces >= 2) this.finish(inBounds ? 'two_bounces' : 'out');
+      // Keep practice rallies alive through repeated in-bounds bounces.
+      if (!inBounds) this.finish('out');
     }
-    if (this.phase === 'rally' && this.age >= this.config.simulation.maxFlightSeconds) this.finish('timeout');
+    if (this.phase === 'rally') {
+      const grounded = b.y <= c.ballRadius + this.config.simulation.stationaryGroundTolerance;
+      const motionless = Math.hypot(b.vx, b.vy, b.vz) <= this.config.simulation.stationarySpeed;
+      this.stationaryFor = grounded && motionless ? this.stationaryFor + dt : 0;
+      if (this.stationaryFor >= this.config.simulation.stationaryTimeoutSeconds) this.finish('stopped', 0);
+    }
   }
   state(player = 'A', t = Date.now()) {
     const server = this.servingTeam === 'A' ? 1 : 2;

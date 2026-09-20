@@ -243,7 +243,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   let previous = performance.now(), accumulator = 0;
   const step = 1 / CONFIG.simulation.hz;
   let prevPhase = sim.phase;
-  let botScheduled = false, botTimer = null;
+  let botScheduled = false, botTimer = null, botContact = null;
   const onRallyComplete = async () => {
     // Adjudication is async and never blocks the sim; a missing or malformed
     // ruling leaves the score untouched (offline-safe default).
@@ -276,9 +276,17 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       }
       prevPhase = sim.phase;
     }
-    // Wall bot: return the first in-bounds far-side bounce after ~0.35 s.
-    if (sim.phase === 'rally' && !botScheduled) {
-      const landed = sim.events.some((e) => e.type === 'bounce' && e.in_bounds && e.z < 0);
+    // Each new contact starts a new shot, even within the same rally.
+    const contactIndex = sim.events.findLastIndex(e => e.type === 'contact');
+    const contact = sim.events[contactIndex];
+    if (contact !== botContact) {
+      botContact = contact;
+      botScheduled = false;
+      if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+    }
+    // Return the current A shot's first in-bounds far-side bounce.
+    if (sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
+      const landed = sim.events.some((e, index) => index > contactIndex && e.type === 'bounce' && e.in_bounds && e.z < 0);
       if (landed) {
         botScheduled = true;
         botTimer = setTimeout(() => { botTimer = null; sim.botReturn(); }, 350);
@@ -296,6 +304,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     for (const ws of hub.clients) { if (!ws.isAlive) ws.terminate(); else { ws.isAlive = false; ws.ping(); } }
   }, CONFIG.network.heartbeatMs);
   const close = async () => {
+    if (botTimer) clearTimeout(botTimer);
     for (const timer of [tick, broadcast, heartbeat]) clearInterval(timer);
     for (const ws of hub.clients) ws.terminate();
     await new Promise(resolve => hub.close(resolve));
