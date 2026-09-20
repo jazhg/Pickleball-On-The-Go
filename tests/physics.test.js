@@ -123,7 +123,7 @@ test('player B serves toward positive z and can return player A shots', () => {
   assert.equal(sim.lastHitter, 'A');
 });
 test('controller orientation has equivalent egocentric launch behavior for seats A and B', () => {
-  const angle = 12 * Math.PI / 180;
+  const angle = (180 - 12) * Math.PI / 180;
   const controller = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(angle / 2), qz: 0, qw: Math.cos(angle / 2) };
   const launches = {};
   for (const player of ['A', 'B']) {

@@ -19,6 +19,7 @@ export function setupTracking({ onPose }) {
   }
   function tick() {
     if (!active) return;
+    const startedAt = performance.now();
     try {
       if (video.readyState >= 2 && video.currentTime !== lastFrame) {
         lastFrame = video.currentTime;
@@ -37,7 +38,7 @@ export function setupTracking({ onPose }) {
         }
       }
     } catch (error) { stop(`Camera tracking stopped: ${error.message}. You can still spawn and hit balls.`); return; }
-    timer = setTimeout(tick, 1000 / CONFIG.simulation.poseHz);
+    timer = setTimeout(tick, Math.max(0, 1000 / CONFIG.simulation.poseHz - (performance.now() - startedAt)));
   }
   button.addEventListener('click', async () => {
     if (loading) return;
@@ -46,7 +47,7 @@ export function setupTracking({ onPose }) {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access needs HTTPS or localhost in a supported browser');
       status.textContent = 'Allow camera access, then stand where both shoulders are visible.';
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: CONFIG.simulation.poseHz, max: CONFIG.simulation.poseHz } }, audio: false });
       video.srcObject = stream; video.hidden = false; await video.play();
       status.textContent = 'Loading the pose tracker…';
       const base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${CONFIG.tracking.version}`;

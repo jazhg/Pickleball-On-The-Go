@@ -98,14 +98,14 @@ test('lost tracking holds briefly, then eases smoothly to neutral', () => {
   const moved = { ...tracker.state().wristOffset };
   tracker.update([], t + CONFIG.tracking.wristLossTimeoutMs - 1);
   assert.deepEqual(tracker.state().wristOffset, moved);
-  const beforeDistance = distance(moved, CONFIG.render.neutralPaddleOffset);
+  const beforeDistance = distance(moved, CONFIG.tracking.neutralWristOffset);
   let maximumStep = 0, previous = moved;
   for (let i = 0; i < 80; i++) {
     tracker.update([], t + CONFIG.tracking.wristLossTimeoutMs + (i + 1) * 67);
     const current = tracker.state().wristOffset;
     maximumStep = Math.max(maximumStep, distance(previous, current)); previous = current;
   }
-  assert.ok(distance(previous, CONFIG.render.neutralPaddleOffset) < beforeDistance);
+  assert.ok(distance(previous, CONFIG.tracking.neutralWristOffset) < beforeDistance);
   assert.ok(maximumStep <= CONFIG.tracking.wristMaxVelocity * 0.067 * 1.1, 'loss recovery never snaps');
 });
 
@@ -138,4 +138,32 @@ test('jump needs consistently raised shoulders and returns smoothly after landin
 test('moving during calibration restarts the stand-still capture', () => {
   const tracker = new PositionTracker(); tracker.update(body()); tracker.update(body(0.7));
   assert.equal(tracker.samples.length, 1);
+});
+
+test('a sidestep covers useful court distance and reverses within 100ms', () => {
+  const { tracker, now } = calibrated();
+  const expected = 0.1 / 0.2 * CONFIG.tracking.shoulderMeters * CONFIG.tracking.lateralGain;
+  let t = now;
+  for (let i = 0; i < 3; i++) tracker.update(body(0.4), t += 1000 / 30);
+  assert.ok(tracker.position.x > expected * 0.85, 'at least 85% of the sidestep arrives within 100ms');
+  assert.ok(tracker.position.x > 0.4, 'small physical step provides useful lateral court coverage');
+  for (let i = 0; i < 3; i++) tracker.update(body(0.6), t += 1000 / 30);
+  assert.ok(tracker.position.x < -expected * 0.75, 'opposite movement responds without lingering in the old direction');
+});
+
+test('faster lateral tracking holds still against small landmark noise', () => {
+  const { tracker, now } = calibrated();
+  for (let i = 0; i < 120; i++) {
+    tracker.update(body(0.5 + (i % 2 ? 0.001 : -0.001)), now + (i + 1) * 1000 / 30);
+    assert.ok(Math.abs(tracker.position.x) < 0.015);
+  }
+});
+
+test('lateral response is consistent across 15 and 30fps camera feeds', () => {
+  const results = [15, 30].map(hz => {
+    const { tracker, now } = calibrated();
+    for (let i = 1; i <= hz / 5; i++) tracker.update(body(0.4), now + i * 1000 / hz);
+    return tracker.position.x;
+  });
+  assert.ok(Math.abs(results[0] - results[1]) < 0.025);
 });

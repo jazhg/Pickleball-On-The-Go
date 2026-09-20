@@ -6,7 +6,7 @@ export const CONFIG = Object.freeze({
     netPostHeight: 0.9144, kitchenDepth: 2.1336, lineWidth: 0.0508,
   },
   simulation: {
-    hz: 120, broadcastHz: 60, poseHz: 15,
+    hz: 120, broadcastHz: 60, poseHz: 30,
     maxCatchupSeconds: 0.1, // 0.05–0.25: cap work after event-loop stalls.
     resetDelaySeconds: 1.7, // 1–3: show the final bounce, then wait for a spawn request.
     stationaryTimeoutSeconds: 3, // 2–5: make respawn available after a grounded ball settles.
@@ -67,12 +67,12 @@ export const CONFIG = Object.freeze({
     eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
     paddlePositionAlpha: 0.34, // Render interpolation only; tracker dynamics are limited separately below.
     paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
-    // Camera-local grip position. The handle sits at the origin and the face
-    // extends outward into the camera view while the tracked wrist remains clamped.
-    neutralPaddleOffset: { x: 0, y: -0.28, z: -0.62 }, // Centers the face in the POV; z stays in front of the near plane.
+    // Face center relative to the player, shared by renderer and ball contacts.
+    neutralPaddleOffset: { x: 0.42, y: -0.60, z: -1.05 },
     maxWristOffset: { x: 0.42, y: 0.32, z: 0.22 }, // Final camera-local safety bounds around neutral.
   },
   tracking: {
+    neutralWristOffset: { x: 0, y: -0.28, z: -0.62 }, // Anatomical grip reference, independent of the rendered face center.
     version: '0.10.21',
     visibility: 0.65, // 0.5–0.8: reject uncertain shoulder landmarks.
     calibrationFrames: 20, // 15–45: about 1.3 seconds at 15 Hz.
@@ -80,6 +80,10 @@ export const CONFIG = Object.freeze({
     minShoulderWidth: 0.06, // 0.04–0.10: reject distant/small detections.
     shoulderMeters: 0.42, // 0.35–0.55: approximate physical shoulder width.
     referenceDistance: 2.5, // 1.5–4 m: assumed distance at calibration; depth is a proxy.
+    lateralGain: 2.5, // Cover the court with smaller physical sidesteps.
+    lateralResponseSeconds: 0.045, // Fast response while moving; quiet readings remain filtered.
+    lateralRestResponseSeconds: 0.14,
+    lateralDeadZone: 0.015, // Metres in court space.
     positionAlpha: 0.2, // 0.1–0.35: smooth camera position estimates.
     movementDeadZone: 0.035, // 0.015–0.08 m: ignore stationary court-position jitter.
     minDepth: 2.6, maxDepth: 6.1, // Stay on your side of the court.
@@ -116,8 +120,7 @@ export const CONFIG = Object.freeze({
   controller: {
     poseTimeoutMs: 500, // Ignore stale orientation when sensors stop delivering samples.
     center: { pitch: 55.5, roll: -1.7, yawRate: 0 }, // Measured upright phone pose.
-    // Both platforms use the W3C frame. Calibration is a captured orthonormal
-    // basis; platform-specific Euler sign patches must not be added here.
+    // Both platforms use the W3C frame. Calibration removes heading only; platform-specific Euler sign patches must not be added here.
     ios: { frame: 'w3c-deviceorientation' },
     android: { frame: 'w3c-deviceorientation' },
   },

@@ -13,8 +13,9 @@ export class PositionTracker {
     this.samples = [];
     this.reference = null;
     this.activeWrist = null;
+    this.lastPositionAt = null;
     this.position = { x: this.config.player.x, z: this.config.player.homeDepth };
-    this.wristOffset = { ...this.config.render.neutralPaddleOffset };
+    this.wristOffset = { ...this.config.tracking.neutralWristOffset };
     this.shoulderOffset = { x: 0, y: -0.12, z: -0.4 };
     this.wristVelocity = { x: 0, y: 0, z: 0 };
     this.wristSamples = [];
@@ -78,12 +79,19 @@ export class PositionTracker {
       this.shoulderOffset.x = this.activeWrist === 15 ? this.config.tracking.shoulderMeters / 2 : -this.config.tracking.shoulderMeters / 2;
     }
 
-    const rawX = clamp((this.reference.shoulderX - shoulderX) / shoulderWidth * c.shoulderMeters, -this.config.court.width / 2 + c.edgeMargin, this.config.court.width / 2 - c.edgeMargin);
+    const rawX = clamp((this.reference.shoulderX - shoulderX) / shoulderWidth * c.shoulderMeters * c.lateralGain, -this.config.court.width / 2 + c.edgeMargin, this.config.court.width / 2 - c.edgeMargin);
     const rawZ = clamp(this.config.player.homeDepth + c.referenceDistance * (this.reference.shoulderWidth / shoulderWidth - 1), c.minDepth, c.maxDepth);
-    const x = Math.abs(rawX - this.position.x) < c.movementDeadZone ? this.position.x : rawX;
+    const elapsed = this.lastPositionAt === null || t <= this.lastPositionAt ? 1 / this.config.simulation.poseHz : (t - this.lastPositionAt) / 1000;
+    const dt = clamp(elapsed, 1 / 120, 0.1);
+    this.lastPositionAt = t;
+    const errorX = rawX - this.position.x;
+    const x = Math.abs(errorX) < c.lateralDeadZone ? this.position.x : rawX;
+    const response = Math.abs(errorX) > 0.08 ? c.lateralResponseSeconds : c.lateralRestResponseSeconds;
+    const lateralAlpha = 1 - Math.exp(-dt / response);
     const z = Math.abs(rawZ - this.position.z) < c.movementDeadZone ? this.position.z : rawZ;
-    this.position.x += c.positionAlpha * (x - this.position.x);
-    this.position.z += c.positionAlpha * (z - this.position.z);
+    this.position.x += lateralAlpha * (x - this.position.x);
+    // Keep depth smoothing stable when the camera frame rate changes.
+    this.position.z += (1 - Math.pow(1 - c.positionAlpha, dt * 15)) * (z - this.position.z);
     this.#updateWrist(landmarks, shoulderX, shoulderY, shoulderWidth, t);
     this.#updateJump(shoulderY, shoulderWidth);
     return { t, type: 'pose', court_x: this.position.x, court_y: this.position.z, torso_deg: 0, wrist_h: this.config.player.paddleHeight };
@@ -117,7 +125,7 @@ export class PositionTracker {
       if (Math.abs(lateralVelocity) >= c.swingStartVelocity * 0.35) this.swing.lastMovingAt = t;
       if (t - this.swing.lastMovingAt > c.swingIdleMs) this.swing.active = false;
     }
-    const neutral = this.config.render.neutralPaddleOffset;
+    const neutral = this.config.tracking.neutralWristOffset;
     const target = {
       x: neutral.x - (this.filteredWrist.x - this.reference.wrist.x) * c.shoulderMeters * c.wristLateralGain,
       y: neutral.y + (this.filteredWrist.y - this.reference.wrist.y) * c.shoulderMeters * c.wristVerticalGain,
@@ -134,7 +142,7 @@ export class PositionTracker {
     const delta = { x: target.x - this.shoulderOffset.x, y: target.y - this.shoulderOffset.y, z: target.z - this.shoulderOffset.z };
     const length = Math.hypot(delta.x, delta.y, delta.z);
     if (length > radius) for (const axis of ['x', 'y', 'z']) target[axis] = this.shoulderOffset[axis] + delta[axis] * radius / length;
-    const neutral = this.config.render.neutralPaddleOffset, max = this.config.render.maxWristOffset;
+    const neutral = this.config.tracking.neutralWristOffset, max = this.config.render.maxWristOffset;
     for (const axis of ['x', 'y', 'z']) target[axis] = clamp(target[axis], neutral[axis] - max[axis], neutral[axis] + max[axis]);
   }
   #stepWrist(target, t) {
@@ -161,7 +169,7 @@ export class PositionTracker {
     if (t - this.lastWristAt <= this.config.tracking.wristLossTimeoutMs) return;
     this.swing.active = false;
     this.swing.progress += this.config.tracking.wristReturnAlpha * (0 - this.swing.progress);
-    this.#stepWrist({ ...this.config.render.neutralPaddleOffset }, t);
+    this.#stepWrist({ ...this.config.tracking.neutralWristOffset }, t);
   }
   #updateJump(shoulderY, shoulderWidth) {
     const c = this.config.tracking;
