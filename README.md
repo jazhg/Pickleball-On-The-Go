@@ -3,11 +3,11 @@
 Play singles to **11, win by 2**, with traditional side-out scoring (only the server scores).
 The relay owns the rules and ball at 120 Hz; both screens receive 60 Hz snapshots.
 
-- **Serve / Space:** request the ball, then swing your phone or press Space again.
+- **Serve:** request the ball, then swing your phone.
   Only the serving player can request or hit the serve. Virtual players move to the
   correct right/even or left/odd service positions, and a highlighted box shows the
   diagonal target. Tracking remains relative to that placement.
-- **WASD / arrow keys:** move without a camera. Enable camera for body tracking.
+- **Camera movement:** enable camera tracking and move your body to position.
 - **Paddle direction:** turn the phone face to aim left/right; recenter establishes
   neutral. Neutral serves are assisted diagonally. Rally shots preserve face bearing;
   loft assistance compensates for drag. Brushing motion adds mild, decaying sidespin.
@@ -30,7 +30,7 @@ Rules reference: [USA Pickleball rules](https://usapickleball.org/rules/).
 
 ```sh
 npm install
-npm run dev:http                 # localhost keyboard demo
+npm run dev:http                 # localhost rendering preview
 # For phones, configure trusted HTTPS as described below, then:
 npm start
 ```
@@ -99,7 +99,7 @@ npm install
 npm run dev:http
 ```
 
-Open [http://localhost:8443/client-laptop/](http://localhost:8443/client-laptop/) and press Space. This is keyboard-only localhost mode. It is useful for verifying the game and does not make the server reachable from a phone.
+Open [http://localhost:8443/client-laptop/](http://localhost:8443/client-laptop/) to preview the court. Live play uses camera tracking and a phone connected over HTTPS. It is useful for verifying the game and does not make the server reachable from a phone.
 
 ## Connect an iPhone on the same Wi-Fi
 
@@ -146,7 +146,7 @@ The server is authoritative at 120 Hz and broadcasts state at 60 Hz.
 
 ## Manual balls, gentler swings, and camera position
 
-Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing or press Space. After each shot, the ball clears and waits for another button press. Spawn requests travel over the seat-attributed WebSocket. Phones receive their assigned seat and shared state, while laptops receive the opponent’s pose.
+Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing your phone. After each shot, the ball clears and waits for another button press. Spawn requests travel over the seat-attributed WebSocket. Phones receive their assigned seat and shared state, while laptops receive the opponent’s pose.
 
 Phone motion needs a 2.5g start and a 600ms quiet recovery. Pitch has less influence, upward launch speed is capped at 3.8m/s, and power saturates at 11m/s. These values live in `shared/config.js`. Tap **Use defaults** on the phone to clear an old personal calibration.
 

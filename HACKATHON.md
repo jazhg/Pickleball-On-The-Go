@@ -43,7 +43,7 @@ using a model as the scenario coverage grows.
 - JavaScript tests exercise scoring/deuce/game over, server ownership/parity, both
   seats' serve trajectories, volley restrictions, second bounce outside, steering,
   spin, interpolation, practice routing, and two-player relay ownership.
-- Browser checks cover court rendering, keyboard serve, solo side-out/scoring,
+- Browser checks during initial implementation covered court rendering, solo side-out/scoring,
   coaching cards, and browser console errors.
 - `scripts/benchmark-gameplay.js` measures contact calculation and simulation CPU
   cost. It does not measure GPU FPS. Static seating went from 382 meshes to three

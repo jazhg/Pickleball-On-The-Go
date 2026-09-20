@@ -33,7 +33,7 @@
     <button id="practice-button" class="spawn-button" type="button" aria-pressed="false" disabled>Practice: Off</button>
     <button id="spawn-button" class="spawn-button" type="button" disabled>Serve</button>
   </header>
-  <aside class="coach-card" aria-label="Rally coaching"><span class="eyebrow">RALLY COACH</span><p id="coach-decision" role="status">Singles · 11, win by 2. Space to serve / swing. WASD to move.</p><button id="coach-train" class="spawn-button" type="button" hidden>Practice this cue</button></aside>
+  <aside class="coach-card" aria-label="Rally coaching"><span class="eyebrow">RALLY COACH</span><p id="coach-decision" role="status">Singles · 11, win by 2. Move your body to position. Swing your phone to play.</p><button id="coach-train" class="spawn-button" type="button" hidden>Practice this cue</button></aside>
   <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="game-sidebar" aria-expanded="false" aria-label="Open game menu">☰ <span>Menu</span></button>
   <audio id="background-music" preload="none"></audio>
   <dialog id="game-sidebar" class="session-panel" aria-labelledby="menu-title">
@@ -41,8 +41,7 @@
     <div class="session-heading"><span id="match-status">CONNECTING</span><span>Serving team <b id="server-number">—</b></span></div>
     <label class="music-setting">Background music <input id="music-toggle" type="checkbox" role="switch" checked /></label>
     <p id="phase-description">Connect your phone to get started.</p>
-    <button id="swing-button" class="swing-button" type="button" disabled>Swing the paddle</button>
-    <p id="swing-hint">Press space or swing your phone.</p>
+    <p id="swing-hint">Move with camera tracking and swing your phone.</p>
     <section class="multiplayer-setup" aria-label="Connect your devices">
       <h2>Bring your team to court</h2>
       <p>One server. Same Wi-Fi. A laptop and phone for each player.</p>
@@ -51,7 +50,6 @@
       <p id="pairing-status" class="pairing-status" role="status">Waiting for device connections…</p>
       <details><summary>Connection help &amp; switch teams</summary><p id="transport-note" class="transport-note"></p><div class="seat-links"><a id="seat-a-link" href="#">Red laptop</a><a id="seat-b-link" href="#">Blue laptop</a></div></details>
     </section>
-    <section class="getting-started" aria-label="Keyboard controls"><h3>Playing with a keyboard?</h3><p>Click <b>New ball</b> above, then press <kbd>Space</kbd> to swing.</p></section>
 
             <section class="tracking-controls" aria-label="Camera position tracking">
               <button id="recenter-button" type="button" class="swing-button" disabled>Reset body tracking</button>
