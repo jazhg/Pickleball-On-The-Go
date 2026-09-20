@@ -26,7 +26,7 @@ export const CONFIG = Object.freeze({
     surfaceRetention: 0.86, // 0.7–0.98: horizontal speed retained at bounce.
     netRetention: 0.18, // 0.05–0.3: speed retained on net contact.
     ballRadius: 0.037,
-    minSpeed: 2.2352, maxSpeed: 15.6464, // 5–35 mph, design clamp.
+    minSpeed: 2.6, maxSpeed: 17.5, // 5–35 mph, design clamp with a stronger default hit profile.
     aimAssist: 0.35, // 0–0.6; start at design's 0.30–0.40.
     hitWindowRadius: 0.9, // 0.6–1.3 m: generous estimated-paddle contact sphere.
     elevationBaseDeg: 18, // 12–22: flatter default trajectory.
@@ -43,8 +43,8 @@ export const CONFIG = Object.freeze({
   seats: { A: { sign: 1 }, B: { sign: -1 } },
   calibration: {
     softG: 2.5, mediumG: 4, hardG: 8, // 2–3 / 3–5 / 6–10: practice swings.
-    softSpeed: 6.5, mediumSpeed: 8.5, hardSpeed: 11, // 5–7 / 7–9 / 10–13 m/s.
-    powerCap: 11, // 9–13 m/s: ignore excess force beyond a deliberate hard swing.
+    softSpeed: 7.5, mediumSpeed: 10, hardSpeed: 12.5, // Higher default launch speeds for a stronger hit feel.
+    powerCap: 12.5, // 9–13 m/s: ignore excess force beyond a deliberate hard swing.
     minGapG: 0.15, // 0.05–0.5: require distinct increasing practice peaks.
   },
   swing: {
