@@ -23,6 +23,7 @@ from classifier import classify_with_metadata, heuristic_classify  # noqa: E402
 from referee import referee_with_metadata  # noqa: E402
 from schema import SHOTS, ZONES  # noqa: E402
 from commentator import choose_clip  # noqa: E402
+from singles import review  # noqa: E402
 
 
 def live_enabled():
@@ -85,7 +86,8 @@ def op_commentary(req):
     return {'op': 'commentary', 'clip': clip, 'path': 'model' if live_enabled() else 'offline'}
 
 
-OPS = {"ping": op_ping, "classify": op_classify, "referee": op_referee, "commentary": op_commentary}
+OPS = {"ping": op_ping, "classify": op_classify, "referee": op_referee, "commentary": op_commentary,
+       "singles": lambda req: {"op": "singles", "review": review(req) if live_enabled() else None}}
 
 
 def respond(payload):

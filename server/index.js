@@ -12,6 +12,8 @@ import { parseAnalysis } from '../shared/shot-telemetry.js';
 import { Simulation } from './physics.js';
 import { adjudicateRally, classifySwing, validateRulingForApply, chooseCommentary } from './nemotron-bridge.js';
 import { RefereeVoiceGate } from '../shared/referee-clips.js';
+import { reviewSingles } from './nemotron-bridge.js';
+import { singlesResult } from '../shared/singles-rules.js';
 
 // Translate authoritative sim events into fixture-style referee events so the
 // Nemotron referee judges the same shape it was evaluated on.
@@ -73,7 +75,7 @@ const lanAddresses = () => Object.values(networkInterfaces())
   .flatMap(addresses => addresses || [])
   .filter(address => address.family === 'IPv4' && !address.internal)
   .map(address => address.address);
-export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0' } = {}) {
+export async function createRelay({ insecure = false, port = CONFIG.network.port, host = insecure ? '127.0.0.1' : '0.0.0.0', reviewGame = reviewSingles } = {}) {
   const sim = new Simulation();
   let multiplayer = false;
   let practiceEnabled = false, practicePlayer = 'A', nextPracticeFeedAt = Infinity;
@@ -293,7 +295,14 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
       } else if (msg.type === 'spawn') {
         const player = ws.player || 'A';
         if (sim.spawn(player)) announce(player === 'A' ? 'red_serves' : 'blue_serves');
-      } else if (msg.type === 'practice' && ws.role === 'laptop') {
+      } else if (msg.type === 'mode' && ws.role === 'laptop') {
+        // Both human laptop seats are required for a competitive singles match.
+        if (msg.mode === 'game' && (!connections().A.laptop || !connections().B.laptop)) return;
+        if (sim.mode === msg.mode && !sim.winner) return;
+        practiceEnabled = false; nextPracticeFeedAt = Infinity;
+        sim.startMode(msg.mode);
+        sendToLaptops({ t: Date.now(), type: 'practice', enabled: false, player: practicePlayer });
+      } else if (msg.type === 'practice' && ws.role === 'laptop' && sim.mode === 'practice') {
         practiceEnabled = msg.enabled;
         practicePlayer = ws.player || 'A';
         nextPracticeFeedAt = practiceEnabled ? performance.now() : Infinity;
@@ -314,6 +323,25 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
   const step = 1 / CONFIG.simulation.hz;
   let prevPhase = sim.phase;
   let botScheduled = false, botTimer = null, botContact = null;
+  let judgedFault = null;
+  const judgeGame = async () => {
+    const fault = sim.gameFault, events = sim.events;
+    judgedFault = fault;
+    let review = null;
+    try { review = await reviewGame(events, { score: [...sim.score], serving_team: sim.servingTeam }, fault); } catch { /* Keep deterministic scoring if inference is unavailable. */ }
+    if (sim.events !== events || sim.mode !== 'game') return;
+    const result = singlesResult(sim.score, sim.servingTeam, fault.player);
+    sim.score = result.score; sim.servingTeam = result.server; sim.winner = result.winner;
+    sim.refereePending = false;
+    if (review?.player !== fault.player || review?.reason !== fault.reason || typeof review?.explanation !== 'string') review = null;
+    const explanation = review?.explanation || fault.explanation;
+    sendToLaptops({ type: 'ruling', fault: true, player: fault.player, rule: fault.reason,
+      explanation, score: [...sim.score], side_out: result.sideOut });
+    sendToLaptops({ t: Date.now(), type: 'ruling_evidence', rule: fault.reason,
+      provisional: !review, path: review ? 'nemotron' : 'rules fallback',
+      trigger_events: [{ label: `${fault.player}: ${explanation}`, t: Math.round(sim.age * 1000) }], preceding_shot: null });
+    announce(result.sideOut ? 'side_out' : result.server === 'A' ? 'point_red' : 'point_blue');
+  };
   const onRallyComplete = async () => {
     // Adjudication is async and never blocks the sim; a missing or malformed
     // ruling leaves the score untouched (offline-safe default).
@@ -359,9 +387,10 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         }
       }
     }
+    if (sim.mode === 'game' && sim.gameFault && sim.gameFault !== judgedFault) judgeGame();
     if (sim.phase !== prevPhase) {
       if (sim.phase === 'rally') botScheduled = false;
-      if (!practiceEnabled && prevPhase === 'rally' && sim.phase === 'reset') {
+      if (sim.mode === 'practice' && !practiceEnabled && prevPhase === 'rally' && sim.phase === 'reset') {
         if (botTimer) { clearTimeout(botTimer); botTimer = null; }
         onRallyComplete();
       }
@@ -383,13 +412,13 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
     // Return the current A shot's first in-bounds far-side bounce.
     // Solo mode gets the training return. When Player B has joined, the real
     // Player B phone/laptop owns the next contact and the bot stays out.
-    if (!practiceEnabled && !multiplayer && sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
+    if (sim.mode === 'practice' && !practiceEnabled && !multiplayer && sim.phase === 'rally' && sim.lastHitter === 'A' && !botScheduled) {
       const landed = sim.events.some((e, index) => index > contactIndex && e.type === 'bounce' && e.in_bounds && e.z < 0);
       if (landed) {
         botScheduled = true;
         botTimer = setTimeout(() => {
           botTimer = null;
-          if (!multiplayer && sim.botReturn()) sendToLaptops({ type: 'racket_hit', t: Date.now() });
+          if (sim.mode === 'practice' && !multiplayer && sim.botReturn()) sendToLaptops({ type: 'racket_hit', t: Date.now() });
         }, 350);
       }
     }

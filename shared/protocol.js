@@ -10,6 +10,7 @@ const fields = {
   ruling_evidence: ['t', 'type', 'rule', 'provisional', 'path', 'trigger_events', 'preceding_shot'],
   spawn: ['t', 'type'],
   practice: ['t', 'type', 'enabled'],
+  mode: ['t', 'type', 'mode'],
   controller_pose: ['t', 'type', 'qx', 'qy', 'qz', 'qw'],
   hello: ['type', 'player', 'role'],
 };
@@ -27,7 +28,8 @@ export function validMessage(msg) {
   const allowed = {
     swing: [],
     pose: ['player'],
-    state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections'],
+    state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections', 'match'],
+    mode: [],
     ruling: [],
     classification: [],
     ruling_evidence: [],
@@ -39,6 +41,7 @@ export function validMessage(msg) {
   const extras = Object.keys(msg).filter(key => !required.includes(key));
   if (extras.some(key => !(allowed[msg.type] || []).includes(key))) return false;
   switch (msg.type) {
+    case 'mode': return finite(msg.t) && msg.t >= 0 && ['practice', 'game'].includes(msg.mode);
     case 'swing': return ['t', 'peak_g', 'pitch', 'roll', 'yaw_rate', 'duration_ms'].every(k => finite(msg[k]))
       && msg.t >= 0 && msg.peak_g >= 0 && msg.peak_g <= 100
       && Math.abs(msg.pitch) <= 180 && Math.abs(msg.roll) <= 180

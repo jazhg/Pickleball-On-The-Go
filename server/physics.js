@@ -1,6 +1,7 @@
 import { paddleCenter } from '../shared/paddle-motion.js';
 import { normalizeControllerPose } from '../shared/protocol.js';
 import { CONFIG } from '../shared/config.js';
+import { FAULTS } from '../shared/singles-rules.js';
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const radians = deg => deg * Math.PI / 180;
 const SEAT = { A: 1, B: -1 };
@@ -24,6 +25,9 @@ export class Simulation {
     this.controllers = { A: null, B: null };
     this.score = [0, 0];
     this.servingTeam = 'A';
+    this.mode = 'practice'; this.winner = null; this.refereePending = false;
+    this.poseOffsets = { A: { x: 0, z: 0 }, B: { x: 0, z: 0 } };
+    this.rawPoses = { A: null, B: null };
     this.reset();
   }
   reset() {
@@ -37,6 +41,17 @@ export class Simulation {
     this.resetIn = 0;
     this.stationaryFor = 0;
     this.events = [];
+    this.gameFault = null; this.initialBounces = new Set(); this.contactCount = 0;
+  }
+  startMode(mode) {
+    this.mode = mode; this.score = [0, 0]; this.servingTeam = 'A';
+    this.winner = null; this.refereePending = false; this.reset();
+  }
+  fault(player, reason) {
+    if (this.gameFault) return;
+    this.gameFault = { player, reason, explanation: FAULTS[reason] };
+    this.refereePending = true;
+    this.finish(reason);
   }
   // Wall bot ("B"): one return of the first in-bounds far-side bounce, ~0.35 s later,
   // so a solo player gets a real rally loop. A demo stand-in, not sensed input.
@@ -55,12 +70,27 @@ export class Simulation {
     return true;
   }
   spawn(player = 'A') {
-    if (this.phase !== 'idle') return false;
+    if (this.phase !== 'idle' || this.winner || this.refereePending) return false;
+    if (this.mode === 'game') {
+      if (player !== this.servingTeam) return false;
+      // Place both virtual players for the correct even/right or odd/left serve.
+      const side = this.score[player === 'A' ? 0 : 1] % 2 === 0 ? 1 : -1;
+      for (const seat of ['A', 'B']) {
+        const sign = seatSign(seat), old = this.rawPoses[seat];
+        const x = sign * side * this.config.court.width / 4;
+        const z = sign * (this.config.court.length / 2 + 0.25);
+        const offset = this.poseOffsets[seat];
+        offset.x = x - (old?.court_x ?? this.config.player.x);
+        offset.z = z - (old ? sign * Math.abs(old.court_y) : sign * this.config.player.homeDepth);
+        this.players[seat] = { t: 0, type: 'pose', court_x: x, court_y: z, torso_deg: 0, wrist_h: this.config.player.paddleHeight, player: seat };
+      }
+    }
     const paddle = this.paddle(player);
     const x = this.players[player]?.court_x ?? this.config.player.x;
     // A stationary serve target in front of the player, clear of the paddle.
     this.ball = { x, y: paddle.y + 0.18, z: paddle.z - seatSign(player) * 0.35, vx: 0, vy: 0, vz: 0 };
     this.events = [];
+    this.gameFault = null; this.initialBounces = new Set(); this.contactCount = 0;
     this.bounces = 0;
     this.age = 0;
     this.stationaryFor = 0;
@@ -98,14 +128,16 @@ export class Simulation {
     return true;
   }
   setPose(pose, player = 'A') {
+    this.rawPoses[player] = { ...pose };
     const c = this.config;
     const s = seatSign(player);
     const halfWidth = c.court.width / 2 - c.tracking.edgeMargin;
-    const depth = clamp(Math.abs(pose.court_y), c.tracking.minDepth, c.tracking.maxDepth);
+    const offset = this.mode === 'game' ? this.poseOffsets[player] : { x: 0, z: 0 };
+    const depth = clamp(Math.abs(s * Math.abs(pose.court_y) + offset.z), c.tracking.minDepth, this.mode === 'game' ? c.court.length / 2 + 1 : c.tracking.maxDepth);
     const normalized = {
       ...pose,
       player,
-      court_x: clamp(pose.court_x, -halfWidth, halfWidth),
+      court_x: clamp(pose.court_x + offset.x, -halfWidth, halfWidth),
       court_y: s * depth,
       wrist_h: c.player.paddleHeight,
     };
@@ -127,6 +159,19 @@ export class Simulation {
     if (controllerPose) this.setController(controllerPose, player);
     const ball = this.ball, paddle = this.paddle(player), c = this.config.physics;
     if (Math.hypot(ball.x - paddle.x, ball.y - paddle.y, ball.z - paddle.z) > c.hitWindowRadius) return false;
+    const volley = !canServe && this.bounces === 0;
+    if (this.mode === 'game' && canServe) {
+      const feet = this.players[player], sign = seatSign(player);
+      const side = this.score[player === 'A' ? 0 : 1] % 2 === 0 ? 1 : -1;
+      if (!feet || Math.abs(feet.court_y) <= this.config.court.length / 2 || feet.court_x * sign * side <= 0) {
+        this.fault(player, 'serve_position'); return false;
+      }
+    }
+    if (this.mode === 'game' && volley) {
+      if (this.initialBounces.size < 2) { this.fault(player, 'two_bounce'); return false; }
+      const feet = this.players[player]?.court_y ?? seatSign(player) * this.config.player.homeDepth;
+      if (Math.abs(feet) <= this.config.court.kitchenDepth + this.config.court.lineWidth / 2) { this.fault(player, 'kitchen'); return false; }
+    }
 
     if (!canServe) Object.assign(ball, paddle);
     const attack = -seatSign(player);
@@ -146,10 +191,8 @@ export class Simulation {
       : Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    // Phone yaw rotates the rendered paddle but is not a reliable swing-path
-    // measurement. A forward phone stroke should stay down the court even when
-    // the player happens to hold the paddle face angled left or right.
-    const azimuth = face ? 0 : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    // The centered paddle face sets the bearing in each player's local frame.
+    const azimuth = face ? Math.atan2(face.x, face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
 
     const raw = {
@@ -181,7 +224,8 @@ export class Simulation {
     this.bounces = 0;
     this.age = 0;
     this.stationaryFor = 0;
-    this.events.push({ type: 'contact', player, time: this.age, ball: { ...ball }, swing: { ...msg } });
+    this.contactCount++;
+    this.events.push({ type: 'contact', player, volley, serve: canServe, time: this.age, ball: { ...ball }, swing: { ...msg } });
     return true;
   }
   finish(reason, resetDelay = this.config.simulation.resetDelaySeconds) {
@@ -192,6 +236,7 @@ export class Simulation {
   step(dt = 1 / this.config.simulation.hz) {
     if (this.phase === 'ready' || this.phase === 'idle') return;
     if (this.phase === 'reset') {
+      if (this.refereePending) return;
       this.resetIn -= dt;
       if (this.resetIn <= 0) this.phase = 'idle';
       return;
@@ -219,6 +264,20 @@ export class Simulation {
       this.bounces++;
       const inBounds = Math.abs(b.x) <= court.width / 2 + c.ballRadius && Math.abs(b.z) <= court.length / 2 + c.ballRadius;
       this.events.push({ type: 'bounce', time: this.age, x: b.x, z: b.z, in_bounds: inBounds, impactSpeed });
+      if (this.mode === 'game') {
+        const receiver = opponentOf(this.lastHitter), sign = seatSign(receiver);
+        if (this.bounces === 1) {
+          if (b.z * sign <= 0) { this.fault(this.lastHitter, 'net'); return; }
+          if (!inBounds) { this.fault(this.lastHitter, 'out'); return; }
+          if (this.contactCount === 1) {
+            const side = this.score[this.servingTeam === 'A' ? 0 : 1] % 2 === 0 ? 1 : -1;
+            if (Math.abs(b.z) <= court.kitchenDepth + court.lineWidth / 2 || b.x * sign * side < -court.lineWidth / 2) {
+              this.fault(this.lastHitter, 'serve_target'); return;
+            }
+          }
+          this.initialBounces.add(receiver);
+        } else { this.fault(receiver, 'double_bounce'); return; }
+      }
       // Keep practice rallies alive through repeated in-bounds bounces.
       if (!inBounds) this.finish('out');
     }
@@ -243,6 +302,8 @@ export class Simulation {
       phase: this.phase,
       ready_for: this.readyFor,
       last_hitter: this.lastHitter,
+      match: { mode: this.mode, winner: this.winner, pending: this.refereePending, server: this.servingTeam,
+        service_side: this.score[this.servingTeam === 'A' ? 0 : 1] % 2 === 0 ? 'right' : 'left' },
     };
   }
 }

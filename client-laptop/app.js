@@ -117,6 +117,12 @@ ui['practice-button'].addEventListener('click', () => {
   if (socket?.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify({ t: Date.now(), type: 'practice', enabled: !practiceEnabled }));
 });
+for (const mode of ['practice', 'game']) document.getElementById(`${mode}-mode`).addEventListener('click', () => {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: Date.now(), type: 'mode', mode }));
+});
+document.getElementById('rematch-button').addEventListener('click', () => {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: Date.now(), type: 'mode', mode: 'game' }));
+});
 
 function receivePose(pose) {
   if (pose.player === localPlayer) return;
@@ -173,8 +179,8 @@ setupTracking({ onPose(pose, trackingState) {
     court_x: seatSign * pose.court_x,
     court_y: seatSign * Math.abs(pose.court_y),
   };
-  playerPosition = { x: signed.court_x, z: signed.court_y };
-  updateMinimap(signed);
+  if (latestState?.match?.mode !== 'game') playerPosition = { x: signed.court_x, z: signed.court_y };
+  if (latestState?.match?.mode !== 'game') updateMinimap(signed);
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(signed));
 } });
 
@@ -186,15 +192,30 @@ function setConnection(text, kind = '') {
 function updateControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
   const phase = latestState?.phase;
+  const match = latestState?.match, game = match?.mode === 'game';
+  const canStart = connected && latestState?.connections?.A.laptop && latestState?.connections?.B.laptop;
+  document.getElementById('game-mode').disabled = !canStart || game;
+  document.getElementById('practice-mode').disabled = !connected || !game;
+  document.getElementById('game-mode').setAttribute('aria-pressed', String(game));
+  document.getElementById('practice-mode').setAttribute('aria-pressed', String(!game));
+  document.getElementById('rematch-button').hidden = !match?.winner;
+  document.getElementById('rematch-button').disabled = !canStart;
+  const guidance = document.getElementById('game-guidance');
+  guidance.hidden = !game;
+  guidance.textContent = match?.winner ? `${teamName(match.winner)} wins ${latestState.score.join('–')}!`
+    : match?.pending ? 'Referee reviewing the point…'
+    : `${teamName(match?.server)} serves from the ${match?.service_side}. Serve diagonally past the kitchen. Let the serve and return bounce. Only the server scores.`;
   const canSwing = connected && rendererReady && localPlayer && (
     (phase === 'ready' && latestState?.ready_for === localPlayer) ||
     (phase === 'rally' && latestState?.last_hitter && latestState.last_hitter !== localPlayer)
   );
   ui['swing-button'].disabled = !canSwing;
   ui['practice-button'].disabled = !(connected && rendererReady && localPlayer);
-  ui['practice-button'].textContent = practiceEnabled ? 'Practice: On' : 'Practice: Off';
+  ui['practice-button'].hidden = game;
+  ui['practice-button'].textContent = practiceEnabled ? 'Auto-feed: On' : 'Auto-feed: Off';
   ui['practice-button'].setAttribute('aria-pressed', String(practiceEnabled));
   spawnButton.disabled = practiceEnabled || !(connected && rendererReady && phase === 'idle');
+  if (game) spawnButton.disabled ||= Boolean(match.winner || match.pending || match.server !== localPlayer);
   ui['phase-dot'].className = `phase-dot ${connected ? phase || '' : ''}`;
   if (!connected) {
     ui['phase-title'].textContent = 'Connecting to court';
@@ -231,6 +252,9 @@ function updateControls() {
     ui['phase-description'].textContent = 'Connected to the relay. Waiting for its first snapshot.';
     ui['swing-hint'].textContent = 'The server controls the ball.';
   }
+  if (connected && game && match.winner) ui['phase-title'].textContent = `${teamName(match.winner)} wins!`;
+  else if (connected && game && match.pending) ui['phase-title'].textContent = 'Referee reviewing';
+  else if (connected && game && phase === 'idle') ui['phase-title'].textContent = `${teamName(match.server)} serves · ${match.service_side}`;
 }
 
 function isState(message) {
@@ -245,10 +269,24 @@ function isState(message) {
 function receiveState(state) {
   if (state.connections && localPlayer) {
     const own = state.connections[localPlayer], other = state.connections[localPlayer === 'A' ? 'B' : 'A'];
-    document.getElementById('match-status').textContent = state.multiplayer ? 'LIVE TWO PLAYER' : 'SOLO PRACTICE';
-    document.getElementById('pairing-status').textContent = `Your phone: ${own.phone ? 'connected' : 'waiting'} · Opponent MacBook: ${other.laptop ? 'connected' : 'waiting'} · Opponent phone: ${other.phone ? 'connected' : 'waiting'}`;
+    document.getElementById('match-status').textContent = state.match?.mode === 'game' ? 'SINGLES · 11, WIN BY 2' : state.multiplayer ? 'PRACTICE · TWO PLAYERS' : 'PRACTICE · SOLO';
+    document.getElementById('pairing-status').replaceChildren(...[
+      ['Your phone', own.phone], ['Opponent laptop', other.laptop], ['Opponent phone', other.phone],
+    ].map(([label, connected]) => {
+      const item = document.createElement('li');
+      item.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+      item.append(Object.assign(document.createElement('i'), { ariaHidden: 'true' }), `${label}: ${connected ? 'connected' : 'waiting'}`);
+      return item;
+    }));
   }
   const previousPhase = latestState?.phase;
+  if (state.match?.mode === 'game' && state.players?.[localPlayer]) {
+    const own = state.players[localPlayer];
+    playerPosition = { x: own.court_x, z: own.court_y };
+    const sign = localPlayer === 'B' ? -1 : 1;
+    document.getElementById('player-dot').setAttribute('cx', 50 + sign * own.court_x / CONFIG.court.width * 94);
+    document.getElementById('player-dot').setAttribute('cy', 110 + sign * own.court_y / CONFIG.court.length * 214);
+  }
   if (state.players && court && typeof court.updateOpponent === 'function') {
     const opponentKey = localPlayer ? Object.keys(state.players).find((key) => key !== localPlayer) : Object.keys(state.players)[0];
     if (opponentKey) court.updateOpponent(state.players[opponentKey]);
@@ -354,6 +392,7 @@ function connect() {
   socket.addEventListener('close', () => {
     refereeVoice.reset();
     setConnection('Connection lost', 'disconnected');
+    document.getElementById('pairing-status').replaceChildren(Object.assign(document.createElement('li'), { textContent: 'Device status unavailable' }));
     updateControls();
     if (!closing) {
       clearTimeout(reconnectTimer);

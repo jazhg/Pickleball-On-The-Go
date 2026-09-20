@@ -6,6 +6,30 @@ import { createRelay } from '../server/index.js';
 import { CONFIG } from '../shared/config.js';
 import { validMessage } from '../shared/protocol.js';
 
+test('game mode synchronizes both seats, waits for referee and ends only with a two-point lead', async () => {
+  let release;
+  const relay = await createRelay({ insecure: true, port: 0, reviewGame: () => new Promise(resolve => { release = resolve; }) });
+  const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;
+  const a = new WebSocket(`${endpoint}&seat=A`), b = new WebSocket(`${endpoint}&seat=B`);
+  try {
+    await Promise.all([once(a, 'open'), once(b, 'open')]);
+    const started = waitForMessage(b, m => m.type === 'state' && m.match?.mode === 'game');
+    a.send(JSON.stringify({ t: 1, type: 'mode', mode: 'game' })); await started;
+    relay.sim.score = [10, 10]; relay.sim.spawn('A'); relay.sim.fault('B', 'double_bounce');
+    await waitForMessage(b, m => m.type === 'state' && m.match?.pending);
+    assert.deepEqual(relay.sim.score, [10, 10]); assert.equal(relay.sim.spawn('A'), false);
+    const ruling = waitForMessage(a, m => m.type === 'ruling'); release(null); await ruling;
+    assert.deepEqual(relay.sim.score, [11, 10]); assert.equal(relay.sim.winner, null);
+    await waitForMessage(a, m => m.type === 'state' && m.phase === 'idle');
+    relay.sim.spawn('A'); relay.sim.fault('B', 'double_bounce');
+    await waitForMessage(b, m => m.type === 'state' && m.match?.pending);
+    const won = waitForMessage(b, m => m.type === 'state' && m.match?.winner === 'A'); release(null); await won;
+    assert.deepEqual(relay.sim.score, [12, 10]); assert.equal(relay.sim.spawn('A'), false);
+    const rematch = waitForMessage(b, m => m.type === 'state' && m.match?.mode === 'game' && !m.match.winner && m.score[0] === 0);
+    a.send(JSON.stringify({ t: 2, type: 'mode', mode: 'game' })); await rematch;
+  } finally { a.close(); b.close(); await relay.close(); }
+});
+
 test('serve recordings reach both players once, without replaying on rejected spawn requests', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws?role=laptop`;
@@ -270,7 +294,7 @@ test('two live player stations share one rally without the solo bot taking Playe
   }
 });
 
-test('visual phone yaw does not steer a straight contact sideways', async () => {
+test('latest phone aim steers contact despite visual throttling and does not affect keyboard aim', async () => {
   const relay = await createRelay({ insecure: true, port: 0 });
   const endpoint = `ws://127.0.0.1:${relay.server.address().port}/ws`;
   let phone, laptop;
@@ -280,14 +304,14 @@ test('visual phone yaw does not steer a straight contact sideways', async () => 
     relay.sim.spawn('B');
     const pose = { t: 1, type: 'controller_pose', qx: 0, qy: 0, qz: 0, qw: 1 };
     for (let i = 0; i < 8; i++) phone.send(JSON.stringify(pose));
-    // A visually yawed paddle must not turn a straight phone stroke sideways.
+    // Aim received after the visual rate limit must still steer the contact.
     phone.send(JSON.stringify({ ...pose, qy: Math.sin(Math.PI / 8), qw: Math.cos(Math.PI / 8) }));
     const shot = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'phone');
     phone.send(JSON.stringify({ t: 2, type: 'swing', ...CONFIG.swing.synthetic }));
     assert.equal((await shot).accepted, true);
     const contact = relay.sim.events.find(e => e.type === 'contact').ball;
     assert.ok(contact.vz > 0);
-    assert.ok(Math.abs(contact.vx / contact.vz) < 1e-10);
+    assert.ok(Math.abs(contact.vx / contact.vz + 1) < 1e-10);
 
     relay.sim.reset(); relay.sim.spawn('B');
     const keyboard = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'laptop');

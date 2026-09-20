@@ -1,5 +1,23 @@
 # Pickleball On The Go — Milestone 1 + Nemotron
 
+Game mode (Menu → Game) requires both laptop seats. It plays singles to 11,
+win by two, with side-out scoring, even/right and odd/left serves, diagonal
+service boxes, the two-bounce rule, kitchen volleys, out balls and double bounces.
+Red serves first. New ball places the virtual players in their service positions;
+only the server can request it. Camera movement then moves relative to that position.
+The match waits for referee review between points and offers New match after a win.
+Practice retains free rallies and the optional automatic ball feed.
+
+With `NEMOTRON_LIVE=1` and `NVIDIA_API_KEY`, Nemotron Lightning reviews each
+recorded game fault and supplies the referee explanation. Its response must agree
+with the observed fault; scores are calculated and validated by the server.
+Timeouts, unavailable APIs and inconsistent responses use the deterministic rules
+fallback, labeled in the evidence panel. This game-mode path uses a concise rule
+summary rather than claiming human-reviewed rulebook citations. Physical foot
+contact, serve wrist/waist mechanics, body hits and post-volley momentum are not
+fully sensed; virtual player centers determine kitchen and service positioning.
+This is a virtual singles implementation, not tournament officiating certification.
+
 Recorded referee voice uses the clips in `client-laptop/audio/referee/` and replaces
 browser text-to-speech. The existing Voice toggle mutes recordings and remembers the
 choice. Confirmed serve and ruling events select factual calls. With `NEMOTRON_LIVE=1`

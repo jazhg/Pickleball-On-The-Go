@@ -78,6 +78,14 @@ export async function chooseCommentary(context, eligible) {
   return response?.path === 'model' && eligible.includes(response.clip) ? response.clip : null;
 }
 
+export async function reviewSingles(events, gameState, fault) {
+  if (!isLiveMode()) return null;
+  const response = await runBridge({ op: 'singles', events, game_state: gameState, fault }, { timeoutMs: 3500 });
+  const review = response?.review;
+  return review?.player === fault.player && review?.reason === fault.reason
+    && typeof review.explanation === 'string' && review.explanation.length <= 240 ? review : null;
+}
+
 // Node-side score safety: validate score and side_out before anything mutates.
 // Returns the ruling when safe to apply, null when malformed.
 export function validateRulingForApply(ruling, currentScore) {

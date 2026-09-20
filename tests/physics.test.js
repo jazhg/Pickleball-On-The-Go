@@ -135,7 +135,7 @@ test('controller orientation has equivalent egocentric launch behavior for seats
     assert.equal(sim.swing(swing, player, controller), true);
     const sign = CONFIG.seats[player].sign;
     launches[player] = { right: sign * sim.ball.vx, forward: -sign * sim.ball.vz, up: sim.ball.vy };
-    assert.ok(Math.abs(launches[player].right) < 1e-9, `${player} launches straight despite paddle yaw`);
+    assert.ok(launches[player].right > 0, `${player} aims right in their own view`);
     assert.ok(launches[player].forward > 0, `${player} still launches into the far court`);
   }
   for (const axis of ['right', 'forward', 'up']) assert.ok(Math.abs(launches.A[axis] - launches.B[axis]) < 1e-9);
@@ -171,7 +171,7 @@ test('wire contract accepts design messages and rejects mutations/non-finite val
   assert.equal(parseMessage('{bad json'), null);
 });
 
-test('phone paddle yaw does not steer a straight stroke sideways for either seat', () => {
+test('phone paddle bearing controls the ball direction for both seats', () => {
   for (const player of ['A', 'B']) {
     for (const degrees of [-70, -45, 0, 45, 70, 120]) {
       const sim = new Simulation();
@@ -182,7 +182,7 @@ test('phone paddle yaw does not steer a straight stroke sideways for either seat
       assert.equal(sim.swing({ ...swing, roll: -90 }, player, aim), true);
       const sign = player === 'A' ? 1 : -1;
       const bearing = Math.atan2(sign * sim.ball.vx, -sign * sim.ball.vz) * 180 / Math.PI;
-      assert.ok(Math.abs(bearing) < 1e-10, `${player}: expected straight launch, got ${bearing}`);
+      assert.ok(Math.abs(bearing - degrees) < 1e-10, `${player}: expected ${degrees}, got ${bearing}`);
       assert.ok(sim.ball.vy <= CONFIG.physics.maxUpwardSpeed);
     }
   }

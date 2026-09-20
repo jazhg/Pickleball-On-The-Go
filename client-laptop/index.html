@@ -28,16 +28,23 @@
       <div class="team-blue"><strong id="score-b">00</strong><span class="player-label">BLUE <i id="serve-b" class="serve-dot" title="Serving" aria-label="Serving" hidden></i></span></div>
     </div>
     <div class="phase-indicator" role="status"><span id="phase-dot" class="phase-dot"></span><strong id="phase-title">Connecting</strong></div>
-    <span id="connection-status" class="connection-status" role="status"><i></i>Connecting</span>
     <button id="camera-button" type="button" class="spawn-button">Enable camera</button>
-    <button id="practice-button" class="spawn-button" type="button" aria-pressed="false" disabled>Practice: Off</button>
     <button id="spawn-button" class="spawn-button" type="button" disabled>New ball</button>
   </header>
+  <aside class="connection-overlay" aria-label="Device connections">
+    <ul><li id="connection-status" class="connection-status" role="status"><i></i>Connecting</li></ul>
+    <ul id="pairing-status" aria-label="Player devices"><li>Waiting for device connections…</li></ul>
+  </aside>
   <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="game-sidebar" aria-expanded="false" aria-label="Open game menu">☰ <span>Menu</span></button>
   <audio id="background-music" preload="none"></audio>
   <dialog id="game-sidebar" class="session-panel" aria-labelledby="menu-title">
     <div class="sidebar-heading"><div><span class="eyebrow">PICKLEBALL ON THE GO</span><h1 id="menu-title">Match menu</h1></div><button id="menu-close" type="button" aria-label="Close game menu">✕</button></div>
     <div class="session-heading"><span id="match-status">CONNECTING</span><span>Server <b id="server-number">—</b></span></div>
+    <fieldset class="mode-selector"><legend>Mode</legend><div><button id="practice-mode" type="button" aria-pressed="true">Practice</button><button id="game-mode" type="button" aria-pressed="false">Game <small>Singles · 11, win by 2</small></button></div><p id="mode-help">Connect both laptops to start a game. Starting a mode resets the score.</p></fieldset>
+    <button id="rematch-button" class="swing-button" type="button" hidden>New match</button>
+    <p id="game-guidance" role="status" hidden></p>
+    <button id="practice-button" class="swing-button" type="button" aria-pressed="false" disabled>Auto-feed: Off</button>
+    <p>Auto-feed sends a practice ball every three seconds.</p>
     <label class="music-setting">Background music <input id="music-toggle" type="checkbox" role="switch" checked /></label>
     <p id="phase-description">Connect your phone to get started.</p>
     <button id="swing-button" class="swing-button" type="button" disabled>Swing the paddle</button>
@@ -47,7 +54,6 @@
       <p>One server. Same Wi-Fi. A laptop and phone for each player.</p>
       <div class="device-card"><span class="eyebrow">YOUR CONTROLLER</span><h3 id="own-team-title">Your phone</h3><p>Open on your phone, enable motion, then recenter toward your laptop.</p><a class="phone-link device-link" href="/client-phone/" target="_blank" rel="noopener">Connect your phone ↗</a></div>
       <div class="device-card"><span class="eyebrow">INVITE YOUR OPPONENT</span><h3 id="opponent-team-title">Second player</h3><p>Send these links to your friend. Run the server on only one MacBook.</p><a id="opponent-link" class="device-link" href="/client-laptop/?seat=B">Open opponent’s laptop ↗</a><a id="opponent-phone-link" class="device-link" href="/client-phone/?seat=B">Connect opponent’s phone ↗</a></div>
-      <p id="pairing-status" class="pairing-status" role="status">Waiting for device connections…</p>
       <details><summary>Connection help &amp; switch teams</summary><p id="transport-note" class="transport-note"></p><div class="seat-links"><a id="seat-a-link" href="#">Red laptop</a><a id="seat-b-link" href="#">Blue laptop</a></div></details>
     </section>
     <section class="getting-started" aria-label="Keyboard controls"><h3>Playing with a keyboard?</h3><p>Click <b>New ball</b> above, then press <kbd>Space</kbd> to swing.</p></section>

@@ -22,6 +22,7 @@ let ballPhase = null;
 let localPlayer = null;
 let readyFor = null;
 let lastHitter = null;
+let match = null;
 let latestOrientation = null;
 let latestOrientationAt = -Infinity;
 let neutralOrientation = null;
@@ -39,9 +40,13 @@ function updateBallControls() {
   const connected = socket?.readyState === WebSocket.OPEN;
   ui.synthetic.disabled = !connected || !canSwingNow() || Boolean(pendingRecenter);
   spawnButton.disabled = !connected || ballPhase !== 'idle';
+  if (match?.mode === 'game') spawnButton.disabled ||= Boolean(match.winner || match.pending || match.server !== localPlayer);
   $('ball-status').textContent =
     !connected ? 'Connect to the court first.'
     : !localPlayer ? 'Waiting for your seat assignment…'
+    : match?.winner ? `${match.winner === 'A' ? 'Red' : 'Blue'} wins! Start a new match on the laptop.`
+    : match?.pending ? 'Referee reviewing the point…'
+    : match?.mode === 'game' && ballPhase === 'idle' ? `${match.server === localPlayer ? 'Your' : match.server === 'A' ? 'Red’s' : 'Blue’s'} serve · ${match.service_side} side.`
     : canSwingNow() ? (ballPhase === 'ready' ? 'Your serve. Swing when ready.' : 'Your return. Swing!')
     : ballPhase === 'idle' ? 'Tap New ball to play.'
     : ballPhase === 'ready' ? `${readyFor === 'A' ? 'Red' : 'Blue'} is serving. Wait for it to reach you.`
@@ -93,11 +98,15 @@ function connect() {
       const badge = $('seat-badge');
       badge.textContent = localPlayer === 'A' ? 'RED' : 'BLUE';
       badge.className = `seat ${localPlayer === 'A' ? 'team-red' : 'team-blue'}`;
+      document.body.dataset.team = localPlayer === 'A' ? 'red' : 'blue';
+      document.querySelector('meta[name="theme-color"]').content = localPlayer === 'A' ? '#291318' : '#101f36';
 
       updateBallControls();
       return;
     }
     if (msg?.type === 'state') {
+      match = msg.match ?? null;
+      document.querySelector('.practice-label').textContent = match?.mode === 'game' ? 'SINGLES · 11, WIN BY 2' : 'PRACTICE MODE';
       if (Array.isArray(msg.score) && localPlayer) {
         $('your-score').textContent = msg.score[localPlayer === 'A' ? 0 : 1];
         $('their-score').textContent = msg.score[localPlayer === 'A' ? 1 : 0];

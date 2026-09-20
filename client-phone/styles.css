@@ -1,5 +1,13 @@
 :root { color-scheme: dark; --bg:#102923; --panel:#19372e; --line:#355044; --text:#f0f4e8; --muted:#a2b8aa; --lime:#d9f582; }
 * { box-sizing:border-box; }
+body[data-team="red"] { --bg:#291318; --panel:#432029; --line:#753440; --muted:#d7aeb6; --lime:#ff8585; --button-shadow:#a74353; }
+body[data-team="blue"] { --bg:#101f36; --panel:#1c3454; --line:#355c87; --muted:#adc4e0; --lime:#83baff; --button-shadow:#3868a1; }
+.remote-status { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.remote-status ul { list-style:none; padding:0; margin:0; }
+.practice-label { color:var(--muted); font-size:10px; letter-spacing:.18em; text-align:center; }
+body[data-team] .swing-button { border-color:var(--lime); box-shadow:0 0 0 9px var(--panel),0 8px 0 var(--button-shadow); }
+body[data-team] .status-dot.connected { box-shadow:none; }
+body[data-team] footer,body[data-team] .score-divider { color:var(--muted); }
 .seat.team-red { color:#ff8585; border-color:#ff858550; }
 .seat.team-blue { color:#83baff; border-color:#83baff50; }
 body { margin:0; color:var(--text); background:var(--bg); font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
