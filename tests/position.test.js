@@ -2,15 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PositionTracker } from '../shared/position-tracker.js';
 import { CONFIG } from '../shared/config.js';
-function body(hip = 0.5, width = 0.2, hipY = 0.65, wrist = { x: hip - 0.22, y: 0.5, z: 0 }) {
-  const points = Array.from({ length: 33 }, () => ({ x: hip, y: hipY, z: 0, visibility: 1 }));
-  points[11] = { x: hip - width / 2, y: 0.4, z: 0, visibility: 1 };
-  points[12] = { x: hip + width / 2, y: 0.4, z: 0, visibility: 1 };
-  points[15] = { ...wrist, visibility: 1 };
-  points[16] = { x: hip + 0.22, y: 0.5, z: 0, visibility: 0.7 };
+
+function body(center = 0.5, width = 0.2, bodyY = 0.65, wrist = { x: center - 0.22, y: 0.5, z: 0 }, visibility = 1) {
+  const points = Array.from({ length: 33 }, () => ({ x: center, y: bodyY, z: 0, visibility: 1 }));
+  points[11] = { x: center - width / 2, y: bodyY - 0.25, z: 0, visibility: 1 };
+  points[12] = { x: center + width / 2, y: bodyY - 0.25, z: 0, visibility: 1 };
+  points[15] = { ...wrist, visibility };
+  points[16] = { x: center + 0.22, y: 0.5, z: 0, visibility: 0.7 };
   return points;
 }
-test('calibrates, maps sideways/depth motion, and freezes on missing landmarks', () => {
+function calibrated() {
+  const tracker = new PositionTracker();
+  let now = 1000;
+  for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) tracker.update(body(), now += 67);
+  return { tracker, now };
+}
+const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+test('calibrates, maps body motion, and freezes court position on missing landmarks', () => {
   const tracker = new PositionTracker();
   for (let i = 0; i < CONFIG.tracking.calibrationFrames - 1; i++) assert.equal(tracker.update(body()), null);
   assert.equal(tracker.update(body()).court_y, CONFIG.player.homeDepth);
@@ -26,38 +35,106 @@ test('calibrates, maps sideways/depth motion, and freezes on missing landmarks',
   tracker.recenter(); assert.equal(tracker.reference, null);
 });
 
-test('wrist offsets are clamped, held briefly, then return toward neutral', () => {
-  const tracker = new PositionTracker();
-  let now = 1000;
-  for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) tracker.update(body(), now += 67);
-  assert.equal(tracker.activeWrist, 15);
-  for (let i = 0; i < 20; i++) tracker.update(body(0.5, 0.2, 0.65, { x: 4, y: -3, z: 5 }), now += 67);
-  const moved = tracker.state().wristOffset;
-  const neutral = CONFIG.render.neutralPaddleOffset, max = CONFIG.render.maxWristOffset;
-  assert.ok(Math.abs(moved.x - neutral.x) <= max.x + 1e-6);
-  assert.ok(Math.abs(moved.y - neutral.y) <= max.y + 1e-6);
-  const held = { ...moved };
-  tracker.update([], now + CONFIG.tracking.wristLossTimeoutMs - 1);
-  assert.deepEqual(tracker.state().wristOffset, held);
-  tracker.update([], now + CONFIG.tracking.wristLossTimeoutMs + 100);
-  assert.ok(Math.abs(tracker.state().wristOffset.x - neutral.x) < Math.abs(held.x - neutral.x));
+test('wrist noise and one extreme wrist-Z sample cannot produce a large jump', () => {
+  const { tracker, now } = calibrated();
+  const initial = { ...tracker.state().wristOffset };
+  let largestStep = 0, previous = initial;
+  for (let i = 0; i < 30; i++) {
+    const noise = ((i * 17) % 9 - 4) * 0.0015;
+    const z = i === 15 ? -100 : i * 0.02;
+    tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + noise, y: 0.5 - noise, z }), now + (i + 1) * 67);
+    const current = tracker.state().wristOffset;
+    largestStep = Math.max(largestStep, distance(previous, current));
+    previous = current;
+  }
+  assert.ok(largestStep < 0.025, `noise step ${largestStep} is bounded`);
+  assert.ok(Math.abs(previous.z - initial.z) < 0.045, 'raw wrist Z is not mapped to paddle depth');
 });
 
-test('jump needs consistent raised hips and returns smoothly after landing', () => {
+test('paddle translation obeys configured velocity and acceleration limits', () => {
+  const { tracker, now } = calibrated();
+  let previous = { ...tracker.state().wristOffset }, previousVelocity = { x: 0, y: 0, z: 0 };
+  const dt = 0.067;
+  for (let i = 0; i < 24; i++) {
+    tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + Math.min(i, 12) * 0.012, y: 0.5 - Math.min(i, 8) * 0.008, z: i % 2 ? 9 : -9 }), now + (i + 1) * 67);
+    const current = tracker.state().wristOffset;
+    const velocity = Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, (current[axis] - previous[axis]) / dt]));
+    assert.ok(Math.hypot(velocity.x, velocity.y, velocity.z) <= CONFIG.tracking.wristMaxVelocity + 1e-6);
+    assert.ok(Math.hypot(velocity.x - previousVelocity.x, velocity.y - previousVelocity.y, velocity.z - previousVelocity.z) / dt <= CONFIG.tracking.wristMaxAcceleration + 1e-6);
+    previous = current; previousVelocity = velocity;
+  }
+});
+
+test('synthetic lateral swing produces close, far, close arc depth', () => {
+  const { tracker, now } = calibrated();
+  const depths = [];
+  // Smooth travel avoids the single-frame landmark rejection and represents a
+  // preparation-to-follow-through sweep across the body.
+  for (let i = 0; i <= 70; i++) {
+    const x = 0.28 + i / 70 * 0.42;
+    tracker.update(body(0.5, 0.2, 0.65, { x, y: 0.5, z: i % 3 }), now + (i + 1) * 67);
+    depths.push(tracker.state().wristOffset.z);
+  }
+  const first = Math.min(...depths.slice(0, 10));
+  const middle = Math.min(...depths.slice(25, 50));
+  const last = Math.min(...depths.slice(-8));
+  assert.ok(middle < first - 0.05, `contact ${middle} reaches farther than start ${first}`);
+  assert.ok(last > middle + 0.04, `follow-through ${last} returns closer than contact ${middle}`);
+});
+
+test('handle stays inside the active-shoulder reach envelope', () => {
+  const { tracker, now } = calibrated();
+  for (let i = 0; i < 60; i++) {
+    tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + i * 0.012, y: 0.5 - i * 0.009, z: -50 }), now + (i + 1) * 67);
+    const state = tracker.state();
+    assert.ok(distance(state.wristOffset, state.shoulderOffset) <= CONFIG.tracking.armReachRadius + 0.005);
+  }
+});
+
+test('lost tracking holds briefly, then eases smoothly to neutral', () => {
+  const { tracker, now } = calibrated();
+  let t = now;
+  for (let i = 0; i < 35; i++) tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + i * 0.006, y: 0.46, z: 0 }), t += 67);
+  const moved = { ...tracker.state().wristOffset };
+  tracker.update([], t + CONFIG.tracking.wristLossTimeoutMs - 1);
+  assert.deepEqual(tracker.state().wristOffset, moved);
+  const beforeDistance = distance(moved, CONFIG.render.neutralPaddleOffset);
+  let maximumStep = 0, previous = moved;
+  for (let i = 0; i < 80; i++) {
+    tracker.update([], t + CONFIG.tracking.wristLossTimeoutMs + (i + 1) * 67);
+    const current = tracker.state().wristOffset;
+    maximumStep = Math.max(maximumStep, distance(previous, current)); previous = current;
+  }
+  assert.ok(distance(previous, CONFIG.render.neutralPaddleOffset) < beforeDistance);
+  assert.ok(maximumStep <= CONFIG.tracking.wristMaxVelocity * 0.067 * 1.1, 'loss recovery never snaps');
+});
+
+test('shoulders alone drive tracking and lateral wrist travel uses first-person axes', () => {
   const tracker = new PositionTracker();
-  for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) tracker.update(body(), i * 67);
+  let now = 1000;
+  const shoulderOnly = () => { const points = body(); points[23].visibility = points[24].visibility = 0; return points; };
+  for (let i = 0; i < CONFIG.tracking.calibrationFrames; i++) tracker.update(shoulderOnly(), now += 67);
+  assert.ok(tracker.reference, 'hips are not required for calibration');
+  const neutral = { ...tracker.state().wristOffset };
+  for (let i = 0; i < 30; i++) tracker.update(body(0.5, 0.2, 0.65, { x: 0.28 + i * 0.005, y: 0.5, z: 100 }), now += 67);
+  assert.ok(tracker.state().wristOffset.x < neutral.x, 'camera-image right maps left in first-person view');
+});
+
+test('jump needs consistently raised shoulders and returns smoothly after landing', () => {
+  const { tracker } = calibrated();
   for (let i = 0; i < 8; i++) tracker.update(body(0.5, 0.2, 0.648 + (i % 2) * 0.002), 2000 + i * 67);
-  assert.equal(tracker.jumpHeight, 0, 'stationary noise stays in the vertical dead zone');
+  assert.equal(tracker.jumpHeight, 0);
   tracker.update(body(0.5, 0.2, 0.58), 3000);
-  assert.equal(tracker.jumpHeight, 0, 'a single raised frame is rejected');
+  assert.equal(tracker.jumpHeight, 0);
   for (let i = 0; i < CONFIG.tracking.jumpConfirmationFrames; i++) tracker.update(body(0.5, 0.2, 0.58), 3100 + i * 67);
-  assert.ok(tracker.jumpHeight > 0, 'consistent raised hips produce a jump');
+  assert.ok(tracker.jumpHeight > 0);
   const raised = tracker.jumpHeight;
   tracker.update(body(), 4000);
-  assert.ok(tracker.jumpHeight < raised && tracker.jumpHeight > 0, 'landing eases rather than snapping');
+  assert.ok(tracker.jumpHeight < raised && tracker.jumpHeight > 0);
   for (let i = 0; i < 40; i++) tracker.update(body(), 4100 + i * 67);
   assert.ok(tracker.jumpHeight < 0.001);
 });
+
 test('moving during calibration restarts the stand-still capture', () => {
   const tracker = new PositionTracker(); tracker.update(body()); tracker.update(body(0.7));
   assert.equal(tracker.samples.length, 1);

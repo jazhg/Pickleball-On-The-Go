@@ -30,13 +30,13 @@ export class SwingDetector {
   constructor(config = CONFIG) {
     this.config = config;
     this.gravity = null;
-    this.reference = { pitch: 0, roll: 0 };
+    this.reference = { pitch: config.controller.center.pitch, roll: config.controller.center.roll };
     this.pitch = 0;
     this.roll = 0;
     this.magnitudeG = 0;
     this.isStatic = false;
     this.staticSince = null;
-    this.referenceCaptured = false;
+    this.referenceCaptured = true;
     this.reset();
   }
 
@@ -98,14 +98,14 @@ export class SwingDetector {
       else for (const axis of axes) this.gravity[axis] += swing.gravityAlpha * (acceleration[axis] - this.gravity[axis]);
       if (!this.referenceCaptured && t - this.staticSince >= swing.gravityCaptureMs) this.captureGravityReference();
       const orientation = angleFromGravity(this.gravity);
-      this.pitch = wrapDegrees(orientation.pitch - this.reference.pitch);
-      this.roll = wrapDegrees(orientation.roll - this.reference.roll);
+      this.pitch = wrapDegrees(this.reference.pitch - orientation.pitch);
+      this.roll = wrapDegrees(this.reference.roll - orientation.roll);
     } else if (this.gravity) {
       if (!this.isStatic) this.staticSince = null;
       // DeviceMotion beta/gamma are x/y-axis angular rates, in degrees/second.
       // Gravity stays frozen through a swing so it cannot absorb linear motion.
-      this.pitch = wrapDegrees(this.pitch + gyro.beta * dt);
-      this.roll = wrapDegrees(this.roll + gyro.gamma * dt);
+      this.pitch = wrapDegrees(this.pitch - gyro.beta * dt);
+      this.roll = wrapDegrees(this.roll - gyro.gamma * dt);
     }
     if (!this.gravity || !this.referenceCaptured) return null;
     const linear = Object.fromEntries(axes.map(axis => [axis, (acceleration[axis] - this.gravity[axis]) / physics.gravity]));

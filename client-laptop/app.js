@@ -487,18 +487,35 @@ function createCourt(THREE) {
   playerRing.rotation.x = -Math.PI / 2;
   scene.add(playerRing);
 
-  // Court-space paddle shares its center with authoritative ball contacts.
+  // Camera-local first-person paddle. The group origin is the player's grip:
+  // camera tracking moves the handle through space while phone orientation rotates
+  // the paddle around that handle like a real wrist-driven swing.
   const paddle = new THREE.Group();
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32), new THREE.MeshStandardMaterial({ color: '#dbe86b', roughness: 0.55, metalness: 0.03, transparent: true, opacity: 0.48, depthWrite: false }));
+  const faceFromGrip = 0.28;
+  const face = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.17, 0.17, 0.035, 32),
+    new THREE.MeshStandardMaterial({
+      color: '#dbe86b', roughness: 0.55, metalness: 0.03,
+      transparent: true, opacity: 0.48, depthWrite: false,
+    }),
+  );
   face.rotation.x = Math.PI / 2;
+  face.position.y = faceFromGrip;
   face.scale.set(0.92, 1, 1.22);
   face.castShadow = true;
   paddle.add(face);
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 8, 32), new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7, transparent: true, opacity: 0.6, depthWrite: false }));
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.17, 0.012, 8, 32),
+    new THREE.MeshStandardMaterial({ color: '#173f39', roughness: 0.7, transparent: true, opacity: 0.6, depthWrite: false }),
+  );
+  rim.position.y = faceFromGrip;
   rim.scale.y = 1.22;
   rim.castShadow = true;
   paddle.add(rim);
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.055), new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9, transparent: true, opacity: 0.6, depthWrite: false }));
+  const handle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.07, 0.22, 0.055),
+    new THREE.MeshStandardMaterial({ color: '#5d3f28', roughness: 0.9, transparent: true, opacity: 0.6, depthWrite: false }),
+  );
   handle.position.y = -0.28;
   handle.castShadow = true;
   paddle.add(handle);

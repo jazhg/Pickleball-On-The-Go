@@ -5,6 +5,17 @@ import { CONFIG } from '../shared/config.js';
 import { validMessage, parseMessage } from '../shared/protocol.js';
 const swing = { t: 1234567, type: 'swing', ...CONFIG.swing.synthetic };
 
+test('positive roll aims left and negative roll aims right', () => {
+  const launch = roll => {
+    const sim = new Simulation();
+    sim.spawn();
+    sim.swing({ ...swing, roll });
+    return sim.ball.vx;
+  };
+  assert.ok(launch(10) < 0);
+  assert.ok(launch(-10) > 0);
+});
+
 test('in-bounds ball keeps bouncing beyond two bounces and only an out landing ends it', () => {
   const sim = new Simulation();
   sim.phase = 'rally';
@@ -110,6 +121,21 @@ test('player B serves toward positive z and can return player A shots', () => {
   assert.equal(sim.swing(swing, 'A'), true);
   assert.ok(sim.ball.vz < 0, 'A returns toward negative z');
   assert.equal(sim.lastHitter, 'A');
+});
+test('controller orientation has equivalent egocentric launch behavior for seats A and B', () => {
+  const angle = 12 * Math.PI / 180;
+  const controller = { t: 1, type: 'controller_pose', qx: 0, qy: Math.sin(angle / 2), qz: 0, qw: Math.cos(angle / 2) };
+  const launches = {};
+  for (const player of ['A', 'B']) {
+    const sim = new Simulation();
+    sim.spawn(player);
+    assert.equal(sim.swing(swing, player, controller), true);
+    const sign = CONFIG.seats[player].sign;
+    launches[player] = { right: sign * sim.ball.vx, forward: -sign * sim.ball.vz, up: sim.ball.vy };
+    assert.ok(launches[player].right > 0, `${player} sees the same right turn`);
+    assert.ok(launches[player].forward > 0, `${player} still launches into the far court`);
+  }
+  for (const axis of ['right', 'forward', 'up']) assert.ok(Math.abs(launches.A[axis] - launches.B[axis]) < 1e-9);
 });
 test('rally reset preserves both tracked player poses', () => {
   const sim = new Simulation();

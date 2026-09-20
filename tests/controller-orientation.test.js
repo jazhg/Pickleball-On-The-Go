@@ -5,44 +5,68 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { CONFIG } from '../shared/config.js';
 import { SwingDetector, calibratedPeakG, validCalibration } from '../shared/swing-detector.js';
-import { orientationQuaternion, forwardReference, relativeOrientation } from '../shared/controller-orientation.js';
+import { orientationQuaternion, forwardReference, relativeOrientation, orientationBasis } from '../shared/controller-orientation.js';
 
-const orientation = (alpha, beta = 90, gamma = 0) => orientationQuaternion({ alpha, beta, gamma });
-const normal = q => [2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y)];
-const near = (actual, expected) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-10, `${actual} != ${expected}`));
+const pose = (alpha, beta = CONFIG.controller.center.pitch, gamma = CONFIG.controller.center.roll) => orientationQuaternion({ alpha, beta, gamma });
+const vector = v => [v.x, v.y, v.z];
+const near = (actual, expected, epsilon = 1e-9) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < epsilon, `${actual} != ${expected}`));
+const relative = (alpha, beta, gamma, reference = forwardReference(pose(20))) => relativeOrientation(pose(alpha, beta, gamma), reference);
 
-test('upright screen faces forward regardless of initial compass heading', () => {
+test('documented normal grip recenters to an upright paddle at every heading', () => {
   for (const heading of [0, 45, 180, 359]) {
-    const q = orientation(heading);
-    near(normal(relativeOrientation(q, forwardReference(q))), [0, 0, -1]);
+    const q = pose(heading);
+    const reference = forwardReference(q);
+    assert.ok(reference, 'ordinary right-side-up grip is accepted');
+    const basis = orientationBasis(relativeOrientation(q, reference));
+    near(vector(basis.up), [0, 1, 0]);
+    near(vector(basis.normal), [0, 0, 1]);
   }
 });
 
-test('calibration preserves tilt and subsequent physical turns', () => {
-  const tilted = orientation(37, 60);
-  const reference = forwardReference(tilted);
-  near(normal(relativeOrientation(tilted, reference)), [0, 0.5, -Math.sqrt(3) / 2]);
-  near(normal(relativeOrientation(orientation(37), reference)), [0, 0, -1]);
-  near(normal(relativeOrientation(orientation(127), reference)), [-1, 0, 0]);
-  near(normal(relativeOrientation(orientation(217), reference)), [0, 0, 1]);
-  near(normal(relativeOrientation(orientation(37, 0), reference)), [0, 1, 0]);
+test('upside-down calibration is rejected instead of creating an inverted local frame', () => {
+  assert.equal(forwardReference(orientationQuaternion({ alpha: 20, beta: -90, gamma: 0 })), null);
+  assert.ok(forwardReference(pose(20)), 'normal grip needs no physical phone flip');
 });
 
-test('rolling phone preserves its face direction and rotates its top', () => {
-  const q = relativeOrientation(orientation(270, 0, 90), forwardReference(orientation(0)));
-  near(normal(q), [0, 0, -1]);
-  near([2 * (q.x * q.y - q.w * q.z), 1 - 2 * (q.x * q.x + q.z * q.z), 2 * (q.y * q.z + q.w * q.x)], [-1, 0, 0]);
+test('left/right turns and forward/back tilts follow physical phone motion', () => {
+  const center = CONFIG.controller.center;
+  const left = orientationBasis(relative(10, center.pitch, center.roll));
+  const right = orientationBasis(relative(30, center.pitch, center.roll));
+  assert.ok(left.normal.x < 0, 'lower compass heading turns the paddle left');
+  assert.ok(right.normal.x > 0, 'higher compass heading turns the paddle right');
+  const forward = orientationBasis(relative(20, center.pitch + 10, center.roll));
+  const backward = orientationBasis(relative(20, center.pitch - 10, center.roll));
+  assert.ok(forward.normal.y < 0, 'top edge away tilts the face forward/down');
+  assert.ok(backward.normal.y > 0, 'top edge back tilts the face backward/up');
 });
 
-test('flat startup waits for a usable heading; invalid sensors are ignored', () => {
-  assert.equal(forwardReference(orientation(0, 0)), null);
-  assert.equal(forwardReference(orientation(120, 180)), null);
-  for (const beta of [null, undefined, NaN, Infinity]) {
-    assert.equal(orientationQuaternion({ alpha: 0, beta, gamma: 0 }), null);
-  }
+test('wrist twist is around the handle/face-normal axis', () => {
+  const absolute = pose(20), reference = forwardReference(absolute);
+  const angle = 12 * Math.PI / 180, half = angle / 2;
+  const twist = { x: 0, y: 0, z: Math.sin(half), w: Math.cos(half) };
+  const multiply = (a, b) => ({
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  });
+  const twisted = orientationBasis(relativeOrientation(multiply(absolute, twist), reference));
+  assert.ok(Math.abs(twisted.normal.x) < 0.03 && Math.abs(twisted.normal.y) < 0.03, 'twist keeps face normal stable');
+  assert.ok(Math.abs(twisted.up.x) > 0.15, 'twist rotates the handle axis');
 });
 
-test('phone events send live poses and recenter without browser screen errors', async () => {
+test('the controller quaternion is seat-independent first-person input', () => {
+  const center = CONFIG.controller.center;
+  const q = relative(32, center.pitch + 7, center.roll - 4);
+  const forSeat = () => [q.x, q.y, q.z, q.w]; // seat conversion belongs to world launch only
+  near(forSeat('A'), forSeat('B'));
+});
+
+test('invalid sensors are ignored', () => {
+  for (const beta of [null, undefined, NaN, Infinity]) assert.equal(orientationQuaternion({ alpha: 0, beta, gamma: 0 }), null);
+});
+
+test('phone events send live poses and reject upside-down recentering', async () => {
   const nodes = new Map();
   const getNode = id => {
     if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { add() {}, remove() {} }, addEventListener(type, handler) { this[type] = handler; } });
@@ -61,28 +85,23 @@ test('phone events send live poses and recenter without browser screen errors', 
     document: { getElementById: getNode }, navigator: { userAgent: 'iPhone' },
     window: { location: { href: 'https://court.test/client-phone/', protocol: 'https:', hostname: 'court.test', search: '' }, isSecureContext: true,
       DeviceMotionEvent: {}, DeviceOrientationEvent: {}, addEventListener(type, handler) { events[type] = handler; } },
-    screen: { orientation: { angle: 0 } }, WebSocket: Socket, URL, URLSearchParams,
-    localStorage: { getItem() { return null; } }, performance,
+    WebSocket: Socket, URL, URLSearchParams, localStorage: { getItem() { return null; } }, performance,
     setInterval(handler) { timers.push(handler); }, clearInterval() {}, clearTimeout() {}, setTimeout() {},
   });
   const source = readFileSync(new URL('../client-phone/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
   vm.runInContext(source, context);
   await getNode('enable-button').click();
-  events.deviceorientation({ alpha: 20, beta: 0, gamma: 0 });
+  events.deviceorientation({ alpha: 20, beta: CONFIG.controller.center.pitch, gamma: CONFIG.controller.center.roll });
   timers[0]();
-  assert.equal(sent.length, 0);
-  events.deviceorientation({ alpha: 20, beta: 90, gamma: 0 });
-  timers[0]();
-  const face = message => normal({ x: message.qx, y: message.qy, z: message.qz, w: message.qw });
   assert.equal(sent.at(-1).type, 'controller_pose');
-  near(face(sent.at(-1)), [0, 0, -1]);
-  events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
+  near([sent.at(-1).qx, sent.at(-1).qy, sent.at(-1).qz, sent.at(-1).qw], [0, 0, 0, 1]);
+  events.deviceorientation({ alpha: 35, beta: CONFIG.controller.center.pitch, gamma: CONFIG.controller.center.roll });
   timers[0]();
-  near(face(sent.at(-1)), [-1, 0, 0]);
+  assert.ok(orientationBasis({ x: sent.at(-1).qx, y: sent.at(-1).qy, z: sent.at(-1).qz, w: sent.at(-1).qw }).normal.x > 0);
   getNode('recenter-button').click();
-  near(face(sent.at(-1)), [0, 0, -1]);
-  context.screen.orientation.angle = 90;
-  events.deviceorientation({ alpha: 110, beta: 90, gamma: 0 });
-  timers[0]();
-  near(face(sent.at(-1)), [0, 0, -1]);
+  near([sent.at(-1).qx, sent.at(-1).qy, sent.at(-1).qz, sent.at(-1).qw], [0, 0, 0, 1]);
+  events.deviceorientation({ alpha: 35, beta: -90, gamma: 0 });
+  const count = sent.length;
+  getNode('recenter-button').click();
+  assert.equal(sent.length, count, 'invalid recenter does not replace the good neutral basis');
 });

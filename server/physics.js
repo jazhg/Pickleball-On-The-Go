@@ -109,8 +109,9 @@ export class Simulation {
 
     const speed = speedFromPeak(msg.peak_g, this.config.calibration);
     const controller = normalizeControllerPose(controllerPose);
-    // Controller +Z is the phone screen normal in the player's view. Seat B's
-    // view reverses court X/Z, but both seats share the same up direction.
+    // Controller +Z is the phone screen normal in the player's local view.
+    // Its centered bearing is +Z in controller coordinates; seat transforms
+    // are applied only below when local right/forward become court X/Z.
     const face = controller && {
       x: 2 * (controller.qx * controller.qz + controller.qw * controller.qy),
       y: 2 * (controller.qy * controller.qz - controller.qw * controller.qx),
@@ -120,7 +121,7 @@ export class Simulation {
       : Math.asin(Math.sin(radians(msg.pitch))) * 180 / Math.PI;
     const gentlePitch = clamp(facePitch, -c.maxPitchInputDeg, c.maxPitchInputDeg);
     const elevation = radians(clamp(c.elevationBaseDeg + gentlePitch * c.pitchGain, c.minElevationDeg, c.maxElevationDeg));
-    const azimuth = face ? Math.atan2(face.x, -face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain + msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
+    const azimuth = face ? Math.atan2(face.x, face.z) : radians(clamp((pose?.torso_deg || 0) * c.torsoGain - msg.roll * c.rollGain, -c.maxAzimuthDeg, c.maxAzimuthDeg));
     const horizontal = speed * Math.cos(elevation);
 
     const raw = {
@@ -128,7 +129,7 @@ export class Simulation {
       vy: Math.sin(elevation) * speed,
       vz: attack * Math.cos(azimuth) * horizontal,
     };
-    const targetX = right * Math.sign(msg.roll || 1) * c.targetX;
+    const targetX = -right * Math.sign(msg.roll || 1) * c.targetX;
     const targetZ = attack * Math.abs(c.targetZ);
     const flight = Math.max(c.minimumTargetFlightSeconds, Math.hypot(targetX - ball.x, targetZ - ball.z) / horizontal);
     const aimed = {

@@ -32,7 +32,7 @@ export function setupTracking({ onPose }) {
           status.textContent = `Stand still: calibrating ${tracker.samples.length}/${CONFIG.tracking.calibrationFrames}.`;
           label.textContent = 'Calibrating';
         } else {
-          status.textContent = 'Show your shoulders and hips clearly. Position is held while you are out of view.';
+          status.textContent = 'Show both shoulders clearly. Position is held while you are out of view.';
           label.textContent = 'You · not tracked';
         }
       }
@@ -45,7 +45,7 @@ export function setupTracking({ onPose }) {
     loading = true; button.disabled = true;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access needs HTTPS or localhost in a supported browser');
-      status.textContent = 'Allow camera access, then stand where your whole upper body is visible.';
+      status.textContent = 'Allow camera access, then stand where both shoulders are visible.';
       stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       video.srcObject = stream; video.hidden = false; await video.play();
       status.textContent = 'Loading the pose tracker…';

@@ -196,8 +196,7 @@ async function enableMotion() {
 }
 
 function onOrientation(event) {
-  const platform = /iPad|iPhone|iPod/.test(navigator.userAgent) ? CONFIG.controller.ios : CONFIG.controller.android;
-  const q = orientationQuaternion(event, platform);
+  const q = orientationQuaternion(event);
   if (!q) return;
   latestOrientation = q;
   latestOrientationAt = performance.now();
@@ -283,7 +282,7 @@ ui.enable.addEventListener('click', enableMotion);
 ui.recenter.addEventListener('click', () => {
   const reference = latestOrientation && forwardReference(latestOrientation);
   if (!reference) {
-    ui.sensorDetail.textContent = 'Hold the phone upright with its screen facing the laptop, then tap Recenter paddle.';
+    ui.sensorDetail.textContent = 'Keep the phone right-side up with its screen facing the laptop, then tap Recenter paddle. Upside-down calibration is ignored.';
     return;
   }
   neutralOrientation = reference;

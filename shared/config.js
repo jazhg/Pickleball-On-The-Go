@@ -65,14 +65,16 @@ export const CONFIG = Object.freeze({
   },
   render: {
     eyeHeight: 1.68, cameraAlpha: 0.15, trailLength: 22, // eye 1.4–1.9; alpha .05–.3; trail 10–40.
-    paddlePositionAlpha: 0.24, // 0.12–0.4: higher follows the wrist faster but admits more jitter.
+    paddlePositionAlpha: 0.34, // Render interpolation only; tracker dynamics are limited separately below.
     paddleRotationAlpha: 0.32, // 0.2–0.5: quaternion slerp fraction per rendered frame.
-    neutralPaddleOffset: { x: 0.42, y: -0.60, z: -1.05 }, // Camera-local metres; z stays in front of the near plane.
-    maxWristOffset: { x: 0.42, y: 0.38, z: 0.22 }, // 0.2–0.6 m per axis: clamp landmark noise to the visible view.
+    // Camera-local grip position. The handle sits at the origin and the face
+    // extends outward into the camera view while the tracked wrist remains clamped.
+    neutralPaddleOffset: { x: 0, y: -0.28, z: -0.62 }, // Centers the face in the POV; z stays in front of the near plane.
+    maxWristOffset: { x: 0.42, y: 0.32, z: 0.22 }, // Final camera-local safety bounds around neutral.
   },
   tracking: {
     version: '0.10.21',
-    visibility: 0.65, // 0.5–0.8: reject uncertain shoulders/hips.
+    visibility: 0.65, // 0.5–0.8: reject uncertain shoulder landmarks.
     calibrationFrames: 20, // 15–45: about 1.3 seconds at 15 Hz.
     calibrationTolerance: 0.035, // 0.02–0.06: stand still in normalized image units.
     minShoulderWidth: 0.06, // 0.04–0.10: reject distant/small detections.
@@ -83,7 +85,19 @@ export const CONFIG = Object.freeze({
     minDepth: 2.6, maxDepth: 6.1, // Stay on your side of the court.
     edgeMargin: 0.35, // 0.2–0.6 m: avoid placing the player on the sideline.
     markerRadius: 0.35, // 0.2–0.5 m: ground-position circle size.
-    wristVisibility: 0.55, // 0.4–0.75: minimum confidence for wrist-relative paddle input.
+    wristVisibility: 0.65, // 0.55–0.8: low-confidence hands do not drive the paddle.
+    wristMedianSamples: 5, // 3–7: odd window suppresses isolated landmark spikes.
+    wristFilterAlpha: 0.22, // 0.12–0.35: low-pass on normalized hand position.
+    wristLateralGain: 0.9, wristVerticalGain: 0.72, // 0.6–1.2: physical-looking hand travel without amplification spikes.
+    wristSampleMaxJump: 0.85, // 0.5–1.2 shoulder widths: reject one-frame x/y teleportation.
+    wristMaxVelocity: 1.15, // 0.7–1.8 m/s: handle translation speed limit.
+    wristMaxAcceleration: 5.5, // 3–9 m/s²: handle translation acceleration limit.
+    armReachRadius: 0.68, // 0.55–0.8 m from the estimated active shoulder.
+    swingStartVelocity: 0.32, // 0.2–0.55 normalized shoulder-widths/s.
+    swingTravel: 0.8, // 0.6–1.2 shoulder widths from preparation through follow-through.
+    swingArcDepth: 0.21, // 0.14–0.28 m: outward reach at contact.
+    swingCloseBias: 0.035, // 0–0.08 m: start/follow-through depth toward the body.
+    swingIdleMs: 320, // 220–500 ms: end an abandoned/finished arc after lateral motion stops.
     wristLossTimeoutMs: 450, // 250–1000 ms: hold the last reliable wrist before returning neutral.
     wristReturnAlpha: 0.1, // 0.05–0.25 per tracking tick: neutral return after a longer loss.
     jumpThreshold: 0.14, // 0.08–0.25 body lengths above baseline before confirming a jump.
@@ -101,9 +115,11 @@ export const CONFIG = Object.freeze({
   },
   controller: {
     poseTimeoutMs: 500, // Ignore stale orientation when sensors stop delivering samples.
-    // Euler sign hooks for device-specific playtesting; orientation uses Z-X-Y conversion.
-    ios: { alpha: 1, beta: 1, gamma: 1 },
-    android: { alpha: 1, beta: 1, gamma: 1 },
+    center: { pitch: 55.5, roll: -1.7, yawRate: 0 }, // Measured upright phone pose.
+    // Both platforms use the W3C frame. Calibration is a captured orthonormal
+    // basis; platform-specific Euler sign patches must not be added here.
+    ios: { frame: 'w3c-deviceorientation' },
+    android: { frame: 'w3c-deviceorientation' },
   },
   nemotron: {
     bridgeScript: 'nemotron/bridge.py', // spawned as: python3 <bridgeScript>
