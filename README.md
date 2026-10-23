@@ -61,8 +61,7 @@ See [HACKATHON.md](HACKATHON.md) for the demo, architecture, evidence, and limit
 ## Verification
 
 ```sh
-npm test
-python3 -m unittest discover -s nemotron/tests
+npm run test:all                 # Node tests + Python Nemotron tests
 node scripts/generate-coach-fixtures.js
 python3 nemotron/eval_coach.py --output nemotron/coach-eval-offline.json
 # With NVIDIA_API_KEY exported (Python does not load .env automatically):
