@@ -37,8 +37,7 @@ npm start
 
 To use live Nemotron, copy `.env.example` to `.env`, set `NVIDIA_API_KEY`, and keep
 `NEMOTRON_LIVE=1`. npm start/dev load `.env` automatically; it is gitignored and never
-served as a public asset. No API key was available for this implementation session,
-so **live-model behavior has not been verified**.
+served as a public asset. **Live-model behavior has not been verified yet.**
 
 ## Where Nemotron fits
 
@@ -81,15 +80,14 @@ above; they are not GPU frame-rate or device-latency measurements.
 
 ---
 
-The following setup notes describe the original controller/tracking integration.
-Current match behavior is described above.
+## Setup and controller details
 
-
-# Pickleball On The Go — Milestone 1
+These notes cover the original controller and tracking integration. Current match
+behavior is described above.
 
 The relay owns the ball simulation. The laptop renders the relay’s state, and the phone sends the fixed section-3 `swing` message. The fastest way to check the connection is the phone page’s **Send test swing** button; it does not need motion permission and should launch the ball on the laptop.
 
-## First run on one laptop
+### First run on one laptop
 
 From this folder:
 
@@ -100,7 +98,7 @@ npm run dev:http
 
 Open [http://localhost:8443/client-laptop/](http://localhost:8443/client-laptop/) to preview the court. Live play uses camera tracking and a phone connected over HTTPS. It is useful for verifying the game and does not make the server reachable from a phone.
 
-## Connect an iPhone on the same Wi-Fi
+### Connect an iPhone on the same Wi-Fi
 
 The phone must use HTTPS. Do this once on the laptop in Terminal:
 
@@ -130,7 +128,7 @@ On the iPhone, install the public CA before opening that URL:
 
 The phone page should show **Connected to the laptop**. Tap **Send test swing** first. Then tap **Enable motion access**, hold the phone still for a second, and swing. The phone page shows the live `peak_g`, pitch, roll, and detector state. The laptop page shows the ball launch.
 
-## What the common failures mean
+### What the common failures mean
 
 | Symptom | Fix |
 | --- | --- |
@@ -143,7 +141,7 @@ The phone page should show **Connected to the laptop**. Tap **Send test swing** 
 
 The server is authoritative at 120 Hz and broadcasts state at 60 Hz.
 
-## Manual balls, gentler swings, and camera position
+### Manual balls, gentler swings, and camera position
 
 Restart the server after pulling these changes and refresh both browsers. The court starts empty. Click **Spawn ball** on either device, then swing your phone. After each shot, the ball clears and waits for another button press. Spawn requests travel over the seat-attributed WebSocket. Phones receive their assigned seat and shared state, while laptops receive the opponent’s pose.
 
@@ -153,7 +151,7 @@ On the laptop, click **Enable camera**, allow access, and stand still with shoul
 
 Position uses hip midpoint and shoulder size; depth is approximate and turning your body can affect it. This is not room-scale position measurement. The tracker uses the MediaPipe library already named in the design and its lite pose model, following the [official Web guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js). The first camera start needs internet to load the CDN library/model.
 
-## Live two-player setup
+### Live two-player setup
 
 Run `npm start` on **one** MacBook. Both MacBooks and both phones must use that
 server's HTTPS LAN address on the same Wi-Fi; do not start separate servers.
