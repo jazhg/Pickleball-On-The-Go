@@ -84,5 +84,7 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the short demo flow and [server/INTEGRA
 ## Tests
 
 ```sh
-npm test
+npm test            # Node tests
+npm run test:py     # Python Nemotron tests
+npm run test:all    # both
 ```
