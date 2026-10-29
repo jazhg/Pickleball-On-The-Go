@@ -308,7 +308,9 @@ test('latest phone aim steers contact despite visual throttling and does not aff
     phone.send(JSON.stringify({ ...pose, qy: Math.sin(Math.PI / 8), qw: Math.cos(Math.PI / 8) }));
     const shot = waitForMessage(laptop, m => m.type === 'shot' && m.source === 'phone');
     phone.send(JSON.stringify({ t: 2, type: 'swing', ...CONFIG.swing.synthetic }));
-    assert.equal((await shot).accepted, true);
+    const phoneShot = await shot;
+    assert.equal(phoneShot.accepted, true);
+    assert.equal(phoneShot.player, 'B'); // callouts color the hit by this seat
     const contact = relay.sim.events.find(e => e.type === 'contact').ball;
     assert.ok(contact.vz > 0);
     assert.ok(Math.abs(contact.vx / contact.vz + 1) < 1e-10);

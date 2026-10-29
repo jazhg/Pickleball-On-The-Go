@@ -268,7 +268,7 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
         const accepted = sim.swing(msg, seat, aim);
         const horizontal = accepted ? Math.hypot(sim.ball.vx, sim.ball.vz) : 0;
         const shot = {
-          type: 'shot', id: nextShotId++, t: msg.t, source: ws.role, accepted,
+          type: 'shot', id: nextShotId++, t: msg.t, player: seat, source: ws.role, accepted,
           reason: accepted ? 'contact' : phaseBefore === 'idle' ? 'no_ball' : phaseBefore === 'ready' ? 'missed' : 'busy',
           swing: msg,
           launch_speed_mps: accepted ? Math.hypot(sim.ball.vx, sim.ball.vy, sim.ball.vz) : null,
