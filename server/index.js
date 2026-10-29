@@ -287,8 +287,8 @@ export async function createRelay({ insecure = false, port = CONFIG.network.port
           classifySwing(msg, pose).then((result) => {
             const c = result.classification;
             lastClassification = { shot: c.shot, target_zone: c.target_zone, confidence: c.confidence };
-            sendToLaptops({ t: Date.now(), type: 'classification', shot: c.shot,
-              target_zone: c.target_zone, confidence: c.confidence, path: result.path });
+            sendToLaptops({ t: Date.now(), type: 'classification', shot_id: shot.id, player: seat,
+              shot: c.shot, target_zone: c.target_zone, confidence: c.confidence, path: result.path });
           }).catch(() => {});
         }
         console.log(`[${ws.role} ${seat}] swing ${msg.peak_g.toFixed(2)}g pitch ${msg.pitch.toFixed(1)}° ${accepted ? 'CONTACT' : sim.phase === 'idle' ? 'no ball: press Spawn ball' : sim.phase === 'ready' ? 'outside hit window' : 'shot already in progress'}`);

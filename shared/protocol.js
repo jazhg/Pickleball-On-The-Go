@@ -31,7 +31,7 @@ export function validMessage(msg) {
     state: ['player', 'players', 'ready_for', 'last_hitter', 'multiplayer', 'connections', 'match'],
     mode: [],
     ruling: [],
-    classification: [],
+    classification: ['shot_id', 'player'],
     ruling_evidence: [],
     spawn: [],
     practice: ['player'],
@@ -71,7 +71,9 @@ export function validMessage(msg) {
     case 'classification': return finite(msg.t) && msg.t >= 0
       && SHOTS.has(msg.shot) && ZONES.has(msg.target_zone)
       && finite(msg.confidence) && msg.confidence >= 0 && msg.confidence <= 1
-      && typeof msg.path === 'string';
+      && typeof msg.path === 'string'
+      && (msg.shot_id === undefined || (Number.isInteger(msg.shot_id) && msg.shot_id > 0))
+      && (msg.player === undefined || ['A', 'B'].includes(msg.player));
     case 'ruling_evidence': return finite(msg.t) && msg.t >= 0
       && typeof msg.rule === 'string' && typeof msg.provisional === 'boolean'
       && typeof msg.path === 'string' && Array.isArray(msg.trigger_events)
